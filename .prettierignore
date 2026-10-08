@@ -1,0 +1,9 @@
+node_modules
+out
+dist
+build
+.gradle
+pnpm-lock.yaml
+LICENSE
+apps/server/gradle
+apps/server/gradlew*

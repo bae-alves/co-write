@@ -1,0 +1,29 @@
+{
+  "name": "co-write",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "type": "module",
+  "packageManager": "pnpm@10.28.0",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "dev": "pnpm --filter @co-write/desktop dev",
+    "build": "pnpm --filter @co-write/desktop build",
+    "lint": "eslint . && prettier --check .",
+    "format": "prettier --write .",
+    "typecheck": "pnpm --filter @co-write/desktop typecheck",
+    "test": "pnpm --filter @co-write/desktop test",
+    "server:test": "cd apps/server && ./gradlew test",
+    "server:run": "cd apps/server && ./gradlew run"
+  },
+  "devDependencies": {
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.12.0",
+    "eslint-plugin-react-hooks": "^7.1.1",
+    "globals": "^17.0.0",
+    "prettier": "^3.9.9",
+    "typescript": "~5.9.0",
+    "typescript-eslint": "^8.71.1"
+  }
+}

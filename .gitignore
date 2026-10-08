@@ -1,0 +1,11 @@
+node_modules/
+out/
+dist/
+build/
+.gradle/
+*.log
+.env
+.DS_Store
+.idea/
+.vscode/
+*.tsbuildinfo
