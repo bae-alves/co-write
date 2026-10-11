@@ -1,5 +1,7 @@
+import { RefreshCw } from 'lucide-react'
 import { useEffect } from 'react'
-import { Button } from '@/components/ui/button'
+import { IconButton } from '@/components/ui/section'
+import { cn } from '@/lib/utils'
 import { serverStatusIntents } from './intent'
 import { useServerStatus } from './model'
 
@@ -11,31 +13,36 @@ export function ServerStatusView() {
   }, [])
 
   return (
-    <div className="flex items-center gap-3 text-sm">
+    <div className="flex items-center gap-1.5">
       <span
         aria-hidden
-        className={
+        className={cn(
+          'size-1.5 rounded-full',
           status.tag === 'online'
-            ? 'size-2 rounded-full bg-success'
+            ? 'bg-success'
             : status.tag === 'offline'
-              ? 'size-2 rounded-full bg-destructive'
-              : 'size-2 rounded-full bg-muted-foreground'
-        }
+              ? 'bg-destructive'
+              : 'bg-muted-foreground',
+        )}
       />
-      <span role="status" className="text-muted-foreground">
+      <span
+        role="status"
+        className="max-w-64 truncate"
+        title={status.tag === 'offline' ? status.reason : undefined}
+      >
         {status.tag === 'idle' && 'Server not checked'}
         {status.tag === 'checking' && 'Checking server…'}
         {status.tag === 'online' && `Server online (v${status.version})`}
         {status.tag === 'offline' && `Server offline: ${status.reason}`}
       </span>
-      <Button
-        variant="outline"
-        size="sm"
+      <IconButton
+        label="Check server"
+        className="size-5"
         disabled={status.tag === 'checking'}
         onClick={() => void serverStatusIntents.checkServer()}
       >
-        Check server
-      </Button>
+        <RefreshCw className={cn(status.tag === 'checking' && 'animate-spin')} />
+      </IconButton>
     </div>
   )
 }

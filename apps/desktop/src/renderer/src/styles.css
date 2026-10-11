@@ -1,71 +1,232 @@
 @import 'tailwindcss';
 
-@custom-variant dark (@media (prefers-color-scheme: dark));
-
+/*
+ * WolfRose Dark. One theme for now; every colour the app uses is a token here so a theme
+ * switcher later only has to swap this block. Names follow shadcn/ui, plus a few extras
+ * (surface, raised, subtle, syntax-*) that the VS Code palette distinguishes.
+ */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --success: oklch(0.627 0.194 149.2);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --radius: 0.625rem;
-}
+  color-scheme: dark;
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --primary: oklch(0.922 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --destructive: oklch(0.704 0.191 22.216);
-    --success: oklch(0.723 0.19 149.6);
-    --border: oklch(1 0 0 / 10%);
-    --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
-  }
+  /* base layers */
+  --background: #1d0f14; /* editor.background */
+  --surface: #26171c; /* sideBar / titleBar / statusBar */
+  --raised: #35262b; /* menus, dropdowns, line highlight, selection in lists */
+  --foreground: #f6dce2;
+  --subtle-foreground: #a78992; /* punctuation, active line number */
+  --muted-foreground: #695b5f; /* comments, inactive tabs, placeholders */
+
+  /* shadcn roles */
+  --primary: #ffb0cb;
+  --primary-hover: #ff83b3;
+  --primary-foreground: #1d0f14;
+  --secondary: #35262b;
+  --secondary-foreground: #f6dce2;
+  --muted: #26171c;
+  --accent: #35262b;
+  --accent-foreground: #f6dce2;
+  --destructive: #f1a59c;
+  --success: #a8e6b0;
+  --warning: #e7af55;
+  --info: #85c3ce;
+  --link: #5ea9c8;
+  --link-active: #85c3ce;
+  --border: #00000000; /* WolfRose separates by shade, not by lines */
+  --separator: #35262b;
+  --input: #26171c;
+  --ring: #ffb0cb; /* focusBorder */
+  --selection: #ffb0cb33;
+  --scrollbar: #695b5f55;
+  --scrollbar-hover: #695b5f88;
+  --radius: 0.5rem;
+
+  /* syntax (tokenColors) */
+  --syntax-comment: #695b5f;
+  --syntax-punctuation: #a78992;
+  --syntax-string: #e7af55;
+  --syntax-keyword: #f1a59c;
+  --syntax-type: #ffb0cb;
+  --syntax-function: #5ea9c8;
+  --syntax-variable: #85c3ce;
+  --syntax-constant: #c4a7e7;
+  --syntax-inserted: #a8e6b0;
 }
 
 @theme inline {
   --color-background: var(--background);
+  --color-surface: var(--surface);
+  --color-raised: var(--raised);
   --color-foreground: var(--foreground);
+  --color-subtle-foreground: var(--subtle-foreground);
+  --color-muted-foreground: var(--muted-foreground);
   --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
   --color-muted: var(--muted);
-  --color-muted-foreground: var(--muted-foreground);
   --color-accent: var(--accent);
   --color-accent-foreground: var(--accent-foreground);
   --color-destructive: var(--destructive);
   --color-success: var(--success);
+  --color-warning: var(--warning);
+  --color-info: var(--info);
+  --color-link: var(--link);
   --color-border: var(--border);
+  --color-separator: var(--separator);
   --color-input: var(--input);
   --color-ring: var(--ring);
+  --radius-sm: calc(var(--radius) - 4px);
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
+  --font-mono:
+    'JetBrains Mono', 'Fira Code', 'Cascadia Code', ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/60;
+  }
+  html,
+  body,
+  #root {
+    @apply h-full;
   }
   body {
     @apply bg-background text-foreground antialiased;
+    overflow: hidden;
+  }
+  ::selection {
+    background: var(--selection);
+  }
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-track,
+  ::-webkit-scrollbar-corner {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: var(--scrollbar);
+    border-radius: 9999px;
+    border: 2px solid transparent;
+    background-clip: content-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background-color: var(--scrollbar-hover);
+  }
+  ::-webkit-scrollbar-thumb:active {
+    background-color: var(--subtle-foreground);
+  }
+}
+
+/* Rendered Markdown. Sanitized HTML from remark/rehype, styled with theme tokens only. */
+@layer components {
+  .prose-wolfrose {
+    @apply mx-auto max-w-[72ch] px-10 py-8 text-[15px] leading-7;
+    color: var(--foreground);
+  }
+  .prose-wolfrose > :first-child {
+    margin-top: 0;
+  }
+  .prose-wolfrose :where(h1, h2, h3, h4, h5, h6) {
+    @apply mt-8 mb-3 font-semibold leading-tight;
+    color: var(--syntax-type);
+  }
+  .prose-wolfrose h1 {
+    @apply text-3xl;
+  }
+  .prose-wolfrose h2 {
+    @apply text-2xl;
+  }
+  .prose-wolfrose h3 {
+    @apply text-xl;
+  }
+  .prose-wolfrose :where(h4, h5, h6) {
+    @apply text-base;
+  }
+  .prose-wolfrose :where(p, ul, ol, blockquote, pre, table) {
+    @apply my-4;
+  }
+  .prose-wolfrose :where(ul, ol) {
+    @apply pl-6;
+  }
+  .prose-wolfrose ul {
+    list-style: disc;
+  }
+  .prose-wolfrose ol {
+    list-style: decimal;
+  }
+  .prose-wolfrose li::marker {
+    color: var(--subtle-foreground);
+  }
+  .prose-wolfrose li > :where(ul, ol) {
+    @apply my-1;
+  }
+  .prose-wolfrose a {
+    color: var(--link);
+    @apply underline decoration-1 underline-offset-2;
+  }
+  .prose-wolfrose a:hover {
+    color: var(--link-active);
+  }
+  .prose-wolfrose strong {
+    @apply font-semibold;
+    color: var(--syntax-type);
+  }
+  .prose-wolfrose em {
+    color: var(--syntax-constant);
+  }
+  .prose-wolfrose del {
+    color: var(--syntax-keyword);
+  }
+  .prose-wolfrose blockquote {
+    @apply pl-4 italic;
+    border-left: 3px solid var(--raised);
+    color: var(--subtle-foreground);
+  }
+  .prose-wolfrose code {
+    @apply rounded-sm px-1.5 py-0.5 font-mono text-[0.88em];
+    background: var(--surface);
+    color: var(--syntax-string);
+  }
+  .prose-wolfrose pre {
+    @apply overflow-x-auto rounded-md p-4 font-mono text-[13px] leading-6;
+    background: var(--surface);
+  }
+  .prose-wolfrose pre code {
+    @apply p-0;
+    background: transparent;
+    color: var(--foreground);
+  }
+  .prose-wolfrose hr {
+    @apply my-8 h-px border-0;
+    background: var(--raised);
+  }
+  .prose-wolfrose table {
+    @apply w-full border-collapse text-sm;
+  }
+  .prose-wolfrose :where(th, td) {
+    @apply px-3 py-1.5 text-left;
+  }
+  .prose-wolfrose th {
+    @apply font-semibold;
+    background: var(--surface);
+    color: var(--syntax-type);
+  }
+  .prose-wolfrose tr:nth-child(even) td {
+    background: color-mix(in srgb, var(--surface) 55%, transparent);
+  }
+  .prose-wolfrose img {
+    @apply max-w-full rounded-md;
+  }
+  .prose-wolfrose input[type='checkbox'] {
+    @apply mr-2 align-middle;
+    accent-color: var(--primary);
+  }
+  .prose-wolfrose li:has(> input[type='checkbox']) {
+    list-style: none;
+    margin-left: -1.25rem;
   }
 }

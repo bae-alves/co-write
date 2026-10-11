@@ -1,8 +1,8 @@
 package dev.cowrite.server.features.health
 
 import dev.cowrite.server.AppConfig
-import dev.cowrite.server.Dependencies
 import dev.cowrite.server.module
+import dev.cowrite.server.testDependencies
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.statement.bodyAsText
@@ -27,7 +27,10 @@ private fun withServer(
     repository: HealthRepository,
     block: suspend io.ktor.server.testing.ApplicationTestBuilder.() -> Unit,
 ) = testApplication {
-    application { module(config, Dependencies(HealthIntents(repository, "1.2.3"))) }
+    application {
+        val base = testDependencies()
+        module(config, dev.cowrite.server.Dependencies(HealthIntents(repository, "1.2.3"), base.auth, base.documents, base.collab))
+    }
     block()
 }
 
@@ -56,6 +59,20 @@ class HealthRoutesTest {
         withServer(FakeHealthRepository()) {
             val response = client.get("/health") { header(HttpHeaders.Origin, "http://localhost:5173") }
             assertEquals("http://localhost:5173", response.headers[HttpHeaders.AccessControlAllowOrigin])
+        }
+
+    @Test
+    fun `allows the packaged desktop app via CORS`() =
+        withServer(FakeHealthRepository()) {
+            val response = client.get("/health") { header(HttpHeaders.Origin, "app://co-write") }
+            assertEquals("app://co-write", response.headers[HttpHeaders.AccessControlAllowOrigin])
+        }
+
+    @Test
+    fun `does not allow file pages (Origin null) via CORS`() =
+        withServer(FakeHealthRepository()) {
+            val response = client.get("/health") { header(HttpHeaders.Origin, "null") }
+            assertNull(response.headers[HttpHeaders.AccessControlAllowOrigin])
         }
 
     @Test

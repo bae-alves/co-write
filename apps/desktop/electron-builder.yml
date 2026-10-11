@@ -1,0 +1,31 @@
+# Desktop packages (Phase 5). `pnpm --filter @co-write/desktop package` builds for the host OS;
+# pass e.g. `-- --linux AppImage deb` / `--mac` / `--win` to pick targets.
+appId: dev.cowrite.desktop
+productName: co-write
+executableName: co-write
+copyright: Copyright © co-write contributors. AGPL-3.0-only.
+directories:
+  output: dist
+  buildResources: build
+# main and preload are bundled by electron-vite (only `electron` stays external) and the renderer
+# is a static bundle, so no node_modules ship with the app.
+files:
+  - out/**/*
+  - package.json
+  - '!**/node_modules/**'
+asar: true
+mac:
+  target: dmg
+  category: public.app-category.productivity
+  hardenedRuntime: true
+win:
+  target: nsis
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+linux:
+  target:
+    - AppImage
+    - deb
+  category: Office
+  maintainer: co-write contributors

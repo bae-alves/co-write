@@ -27,6 +27,7 @@ export default defineConfig(({ mode }) => {
   const env = loadEnv(mode, process.cwd(), 'VITE_')
   return {
     main: {},
+    preload: {},
     renderer: {
       resolve: { alias: { '@': resolve('src/renderer/src') } },
       plugins: [

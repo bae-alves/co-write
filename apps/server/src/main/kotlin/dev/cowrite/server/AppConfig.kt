@@ -8,6 +8,8 @@ data class AppConfig(
     val databaseUser: String,
     val databasePassword: String,
     val corsAllowedHosts: List<String>,
+    /** Stored updates per document before the server asks a client for a compacted snapshot. */
+    val compactAfter: Int,
 ) {
     companion object {
         fun fromEnv(env: Map<String, String> = System.getenv()): AppConfig =
@@ -22,6 +24,7 @@ data class AppConfig(
                         .split(',')
                         .map { it.trim() }
                         .filter { it.isNotEmpty() },
+                compactAfter = env["COMPACT_AFTER"]?.toInt() ?: 200,
             )
     }
 }
