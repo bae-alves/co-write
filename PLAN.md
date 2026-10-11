@@ -154,12 +154,20 @@ CodeMirror ⇄ y-codemirror.next binding ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider �
 
 ## Open questions
 
-Answered while building: auth (self-managed accounts), persistence format (update log + client-supplied snapshots), Y.Doc placement (as proposed), packaging targets (configured for all three). Still open:
+Answered:
 
-- OAuth / SSO on top of local accounts?
+- Auth provider: Self-managed accounts + Oauth. Keeping in mind self-managed is not user+password based, it's pem key based.
+- Persistence format: whatever guarantees people won't lose their work > the most efficient.
+- Target platform is Linux
+- Where the `Y.Doc` lives in MVI terms: proposal is that the editor feature's repository owns the `Y.Doc` + WebSocket provider, and the model holds only a DFA over the connection/session (`connecting → synced → offline …`); CodeMirror binds to the doc through the repository. (Yes. This)
+
+**Not yet reflected in the code** (v1 above predates these answers): accounts are username + password, not PEM keys, and there is no OAuth; compaction deletes the update prefix that a client-supplied snapshot replaces, which trades safety for size; packaging is configured for macOS and Windows too.
+
+Still open:
+
+- Exposed vs. jOOQ for the Ktor data layer (plain JDBC + HikariCP behind the repositories so far).
 - Revoking access for a connected socket: role changes apply on the next connection today.
 - Session token in the WebSocket query string (browsers cannot set headers on upgrade): fine over `wss://`, but a short-lived ticket endpoint would keep it out of proxy logs.
 - Snapshots come from editors' clients; a malicious editor could submit a bogus full state. Editors can already delete everything, but history would need server-side Yjs to verify.
-- Login rate limiting, account deletion, password change.
-- Exposed vs. jOOQ, once queries outgrow plain JDBC.
-- Signing/notarization and icons for the packaged apps.
+- Rate limiting, account deletion, key rotation.
+- Icons for the packaged app.
