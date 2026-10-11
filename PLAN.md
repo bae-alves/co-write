@@ -140,8 +140,8 @@ CodeMirror ⇄ y-codemirror.next binding ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider �
 
 ## Open questions
 
-- Auth provider: self-managed accounts vs. OAuth?
-- Persistence format: raw Yjs update log vs. periodic snapshots only?
-- Target platforms for packaging (macOS / Windows / Linux)?
+- Auth provider: Self-managed accounts + Oauth. Keeping in mind self-managed is not user+password based, it's pem key based.
+- Persistence format: whatever guarantees people won't lose their work > the most efficient.
+- Target platform is Linux
 - Exposed vs. jOOQ for the Ktor data layer (Phase 0 uses plain JDBC + HikariCP behind the repository).
-- Where the `Y.Doc` lives in MVI terms: proposal is that the editor feature's repository owns the `Y.Doc` + WebSocket provider, and the model holds only a DFA over the connection/session (`connecting → synced → offline …`); CodeMirror binds to the doc through the repository.
+- Where the `Y.Doc` lives in MVI terms: proposal is that the editor feature's repository owns the `Y.Doc` + WebSocket provider, and the model holds only a DFA over the connection/session (`connecting → synced → offline …`); CodeMirror binds to the doc through the repository. (Yes.  This)
