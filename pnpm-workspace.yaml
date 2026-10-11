@@ -1,5 +1,6 @@
 packages:
   - apps/desktop
+  - packages/shared
 onlyBuiltDependencies:
   - electron
   - esbuild

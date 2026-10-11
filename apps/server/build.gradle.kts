@@ -24,6 +24,7 @@ dependencies {
     implementation(libs.ktor.server.netty)
     implementation(libs.ktor.server.content.negotiation)
     implementation(libs.ktor.server.cors)
+    implementation(libs.ktor.server.websockets)
     implementation(libs.ktor.serialization.json)
     implementation(libs.serialization.json)
     implementation(libs.hikari)

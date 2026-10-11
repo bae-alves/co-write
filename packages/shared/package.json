@@ -1,0 +1,23 @@
+{
+  "name": "@co-write/shared",
+  "version": "0.0.0",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "description": "IPC and server protocol contracts shared by the desktop main, preload and renderer",
+  "type": "module",
+  "exports": {
+    ".": "./src/index.ts",
+    "./channels": "./src/channels.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "zod": "^4.6.6"
+  },
+  "devDependencies": {
+    "typescript": "~5.9.0",
+    "vitest": "^5.0.3"
+  }
+}

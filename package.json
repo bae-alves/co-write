@@ -12,10 +12,12 @@
     "build": "pnpm --filter @co-write/desktop build",
     "lint": "eslint . && prettier --check .",
     "format": "prettier --write .",
-    "typecheck": "pnpm --filter @co-write/desktop typecheck",
-    "test": "pnpm --filter @co-write/desktop test",
+    "typecheck": "pnpm -r typecheck",
+    "test": "pnpm -r test",
     "server:test": "cd apps/server && ./gradlew test",
-    "server:run": "cd apps/server && ./gradlew run"
+    "server:run": "cd apps/server && ./gradlew run",
+    "test:e2e": "pnpm --filter @co-write/desktop test:e2e",
+    "package": "pnpm --filter @co-write/desktop package"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
