@@ -13,6 +13,8 @@ export interface ProjectDeps {
     close(): Promise<void>
   }
   readonly revealSource: () => void
+  /** File mode starts with the files column hidden, without changing the remembered layout. */
+  readonly hideFiles: () => void
 }
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
@@ -28,7 +30,13 @@ export function normalizeNewFileName(name: string): string | null {
   return /\.(md|markdown|mdown|mkd)$/i.test(path) ? path : `${path}.md`
 }
 
-export function createProjectIntents({ model, repository, documents, revealSource }: ProjectDeps) {
+export function createProjectIntents({
+  model,
+  repository,
+  documents,
+  revealSource,
+  hideFiles,
+}: ProjectDeps) {
   const go = (next: Project) => model.getState().go(next)
   const show = (info: ProjectInfo) => {
     const now = model.getState().state
@@ -36,17 +44,30 @@ export function createProjectIntents({ model, repository, documents, revealSourc
       tag: 'open',
       name: info.name,
       tree: info.tree,
+      file: info.file ?? null,
       collapsed: now.tag === 'open' && now.name === info.name ? now.collapsed : [],
     })
   }
 
   return {
-    /** Re-attaches to the folder main already has open (after a reload). */
+    /** Re-attaches to the folder main already has open (after a reload, or `co-write <path>`). */
     async restore(): Promise<void> {
       const info = await repository.current().catch(() => null)
       if (!info || model.getState().state.tag !== 'none') return
       go({ tag: 'opening' })
       show(info)
+      if (info.file) {
+        hideFiles()
+        await this.openFile(info.file)
+      }
+    },
+
+    /** File mode → folder mode: the folder around the open file, keeping the file open. */
+    async openFileFolder(): Promise<void> {
+      const now = model.getState().state
+      if (now.tag !== 'open' || now.file === null) return
+      const info = await repository.openFileFolder().catch(() => null)
+      if (info) show(info)
     },
 
     async openFolder(): Promise<void> {
@@ -90,7 +111,8 @@ export function createProjectIntents({ model, repository, documents, revealSourc
 
     /** Creates `name` in the project and opens it. Returns an error message, or null. */
     async createFile(name: string): Promise<string | null> {
-      if (model.getState().state.tag !== 'open') return 'Open a folder first.'
+      const now = model.getState().state
+      if (now.tag !== 'open' || now.file !== null) return 'Open a folder first.'
       const path = normalizeNewFileName(name)
       if (!path) return 'Enter a file name inside the project.'
       try {
@@ -114,4 +136,5 @@ export const projectIntents = createProjectIntents({
   repository: projectRepository,
   documents: documentIntents,
   revealSource: () => workbenchIntents.reveal('source'),
+  hideFiles: () => workbenchIntents.setVisible('files', false, { remember: false }),
 })

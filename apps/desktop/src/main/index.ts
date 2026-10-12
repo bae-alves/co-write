@@ -4,18 +4,23 @@ import { app, BrowserWindow, dialog, ipcMain, net, protocol, safeStorage, sessio
 import { buildCsp } from './csp'
 import { registerIpc } from './ipc'
 import { installMenu } from './menu'
+import { launchTarget } from './project'
 import { APP_ORIGIN, APP_SCHEME, resolveAppAsset } from './protocol'
+import icon from '../../resources/icon.png?asset'
 
 const SERVER_ORIGIN = import.meta.env.MAIN_VITE_SERVER_URL ?? 'http://localhost:8080'
 const DEV_URL = process.env['ELECTRON_RENDERER_URL']
 const RENDERER_DIR = join(__dirname, '../renderer')
+
+// One process: launching again (another file from the file manager) opens a window here.
+if (!app.requestSingleInstanceLock()) app.exit()
 
 // Must happen before `ready`: `app://` behaves like https (secure context, fetch, origin).
 protocol.registerSchemesAsPrivileged([
   { scheme: APP_SCHEME, privileges: { standard: true, secure: true, supportFetchAPI: true } },
 ])
 
-function createWindow(): void {
+function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1400,
     height: 860,
@@ -24,6 +29,7 @@ function createWindow(): void {
     show: false,
     title: 'co-write',
     backgroundColor: '#1D0F14',
+    icon,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       contextIsolation: true,
@@ -42,6 +48,7 @@ function createWindow(): void {
   win.webContents.on('will-attach-webview', (event) => event.preventDefault())
 
   void win.loadURL(DEV_URL ?? `${APP_ORIGIN}/index.html`)
+  return win
 }
 
 void app.whenReady().then(() => {
@@ -64,7 +71,7 @@ void app.whenReady().then(() => {
     callback(false),
   )
 
-  registerIpc({
+  const ipc = registerIpc({
     ipcMain,
     windowFor: (sender) => BrowserWindow.fromWebContents(sender),
     pickFolder: async (window) => {
@@ -86,7 +93,14 @@ void app.whenReady().then(() => {
   })
   installMenu(Boolean(DEV_URL))
 
-  createWindow()
+  // argv is `co-write [path]` packaged and `electron . [path]` in development.
+  const openWindow = async (argv: readonly string[], cwd: string): Promise<void> => {
+    const target = await launchTarget(argv.slice(app.isPackaged ? 1 : 2), cwd)
+    const win = createWindow()
+    if (target) ipc.openLaunchTarget(win.webContents, target)
+  }
+  app.on('second-instance', (_event, argv, cwd) => void openWindow(argv, cwd))
+  void openWindow(process.argv, process.cwd())
 })
 
 // Linux only: closing the last window quits.

@@ -16,6 +16,7 @@ import {
   createProjectFile,
   listTree,
   readProjectFile,
+  type LaunchTarget,
   saveProjectFile,
   watchProject,
 } from './project'
@@ -68,12 +69,17 @@ export interface IpcDeps {
 /** Per-window project state: the only folder that window's file calls may touch. */
 interface ProjectSession {
   readonly root: string
+  /** File mode: the one file in `root` this window may touch. Null in folder mode. */
+  readonly file: string | null
   readonly stopWatching: () => void
 }
 
 const NoArgs = z.tuple([])
 
-export function registerIpc(deps: IpcDeps): void {
+export function registerIpc(deps: IpcDeps): {
+  /** `co-write <path>`: opens a folder (folder mode) or one file (file mode) before the renderer asks. */
+  openLaunchTarget(sender: WebContents, target: LaunchTarget): void
+} {
   const projects = new Map<number, ProjectSession>()
   const docStateDir = join(deps.userDataDir, 'doc-state')
   const credentialsFile = join(deps.userDataDir, 'credentials.bin')
@@ -94,54 +100,79 @@ export function registerIpc(deps: IpcDeps): void {
     })
   }
 
-  const rootOf = (event: IpcMainInvokeEvent): string => {
+  /** The root `path` resolves against, once it is clear the window may touch `path` at all. */
+  const rootFor = (event: IpcMainInvokeEvent, path: string): string => {
     const project = projects.get(event.sender.id)
     if (!project) throw new Error('No project is open')
+    if (project.file !== null && path !== project.file) {
+      throw new Error(`Only ${project.file} is open; open its folder first`)
+    }
     return project.root
   }
 
-  const info = async (root: string): Promise<ProjectInfo> => ({
+  const info = async ({
+    root,
+    file,
+  }: Omit<ProjectSession, 'stopWatching'>): Promise<ProjectInfo> => ({
     name: root.split(/[\\/]/).filter(Boolean).pop() ?? root,
-    tree: await listTree(root),
+    ...(file === null
+      ? { tree: await listTree(root) }
+      : { tree: [{ name: file, path: file, kind: 'file' as const }], file }),
   })
 
-  handle(IpcChannel.openProject, NoArgs, async (event) => {
-    const root = await deps.pickFolder(deps.windowFor(event.sender))
-    if (!root) return null
-    projects.get(event.sender.id)?.stopWatching()
-    const sender = event.sender
-    const stopWatching = watchProject(root, (change: ProjectChange) => {
-      if (!sender.isDestroyed()) sender.send(IpcChannel.projectChanged, change)
-    })
-    projects.set(sender.id, { root, stopWatching })
+  const attach = (sender: WebContents, root: string, file: string | null): void => {
+    projects.get(sender.id)?.stopWatching()
+    const stopWatching = watchProject(
+      root,
+      (change: ProjectChange) => {
+        if (!sender.isDestroyed()) sender.send(IpcChannel.projectChanged, change)
+      },
+      file,
+    )
+    projects.set(sender.id, { root, file, stopWatching })
     sender.once('destroyed', () => {
       projects.get(sender.id)?.stopWatching()
       projects.delete(sender.id)
     })
-    return info(root)
+  }
+
+  handle(IpcChannel.openProject, NoArgs, async (event) => {
+    const root = await deps.pickFolder(deps.windowFor(event.sender))
+    if (!root) return null
+    attach(event.sender, root, null)
+    return info({ root, file: null })
+  })
+
+  // Widens a window from its file to the folder holding it; the user asked for exactly that one.
+  handle(IpcChannel.openFileFolder, NoArgs, async (event) => {
+    const project = projects.get(event.sender.id)
+    if (!project) return null
+    if (project.file !== null) attach(event.sender, project.root, null)
+    return info({ root: project.root, file: null })
   })
 
   handle(IpcChannel.listProject, NoArgs, async (event) => {
     const project = projects.get(event.sender.id)
-    return project ? info(project.root) : null
+    if (!project) return null
+    return info(project)
   })
 
   handle(IpcChannel.readFile, z.tuple([RelativePathSchema]), async (event, [path]) =>
-    readProjectFile(rootOf(event), path),
+    readProjectFile(rootFor(event, path), path),
   )
 
   handle(
     IpcChannel.saveFile,
     z.tuple([RelativePathSchema, FileContentSchema]),
-    async (event, [path, content]) => saveProjectFile(rootOf(event), path, content),
+    async (event, [path, content]) => saveProjectFile(rootFor(event, path), path, content),
   )
 
   handle(IpcChannel.createFile, z.tuple([RelativePathSchema]), async (event, [path]) =>
-    createProjectFile(rootOf(event), path),
+    createProjectFile(rootFor(event, path), path),
   )
 
   const stateFile = (event: IpcMainInvokeEvent, ref: DocRef): string =>
-    docStateFile(docStateDir, ref, ref.kind === 'local' ? rootOf(event) : null)
+    docStateFile(docStateDir, ref, ref.kind === 'local' ? rootFor(event, ref.path) : null)
 
   handle(IpcChannel.loadDocState, z.tuple([DocRefSchema]), async (event, [ref]) =>
     loadBytes(stateFile(event, ref)),
@@ -162,4 +193,10 @@ export function registerIpc(deps: IpcDeps): void {
   )
 
   handle(IpcChannel.clearCredentials, NoArgs, async () => removeFile(credentialsFile))
+
+  return {
+    openLaunchTarget(sender, target) {
+      attach(sender, target.root, target.file)
+    },
+  }
 }

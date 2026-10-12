@@ -56,6 +56,11 @@ export interface FileNode {
 export interface ProjectInfo {
   readonly name: string
   readonly tree: readonly FileNode[]
+  /**
+   * File mode (`co-write notes.md`): only this file is open, not the folder around it, and it is
+   * the only file the window may touch. Absent in folder mode.
+   */
+  readonly file?: string
 }
 
 export type ProjectChange =
@@ -67,6 +72,8 @@ export interface CoWriteApi {
   /** Shows a folder picker; the chosen folder becomes the only place file calls may touch. */
   openProject(): Promise<ProjectInfo | null>
   listProject(): Promise<ProjectInfo | null>
+  /** File mode → folder mode: opens the folder that holds the file. */
+  openFileFolder(): Promise<ProjectInfo | null>
   readFile(path: string): Promise<string>
   saveFile(path: string, content: string): Promise<void>
   /** Creates an empty file; fails if it already exists. */

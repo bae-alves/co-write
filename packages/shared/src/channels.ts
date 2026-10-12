@@ -10,6 +10,7 @@
 export const IpcChannel = {
   openProject: 'project:open',
   listProject: 'project:list',
+  openFileFolder: 'project:open-file-folder',
   readFile: 'file:read',
   saveFile: 'file:save',
   createFile: 'file:create',

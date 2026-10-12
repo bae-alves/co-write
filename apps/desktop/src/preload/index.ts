@@ -17,6 +17,7 @@ function subscribe<T>(channel: string, listener: (value: T) => void): () => void
 const api: CoWriteApi = {
   openProject: () => ipcRenderer.invoke(IpcChannel.openProject),
   listProject: () => ipcRenderer.invoke(IpcChannel.listProject),
+  openFileFolder: () => ipcRenderer.invoke(IpcChannel.openFileFolder),
   readFile: (path) => ipcRenderer.invoke(IpcChannel.readFile, path),
   saveFile: (path, content) => ipcRenderer.invoke(IpcChannel.saveFile, path, content),
   createFile: (path) => ipcRenderer.invoke(IpcChannel.createFile, path),
