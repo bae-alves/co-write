@@ -45,7 +45,7 @@ export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
       this.setVisible(column, !ready().columns[column])
     },
 
-    setVisible(column: Column, visible: boolean): void {
+    setVisible(column: Column, visible: boolean, { remember = true } = {}): void {
       const state = ready()
       if (state.columns[column] === visible) return
       if (!visible && !canHide(state.columns, column)) {
@@ -54,7 +54,7 @@ export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
       }
       const columns = { ...state.columns, [column]: visible }
       model.getState().go({ ...state, columns })
-      repository.storeColumns(columns)
+      if (remember) repository.storeColumns(columns)
     },
 
     /** Makes a column visible (e.g. opening a file brings the source back). */

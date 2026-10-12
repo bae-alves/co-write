@@ -13,6 +13,7 @@ directories:
 # is a static bundle, so no node_modules ship with the app.
 files:
   - out/**/*
+  - resources/icon.png
   - package.json
   - '!**/node_modules/**'
 asar: true
@@ -21,6 +22,11 @@ linux:
     - AppImage
     - deb
   category: Office
+  # White Markdown mark (public domain, svgrepo.com); icon.png is rendered from icon.svg.
+  icon: resources/icon.png
+  # Lets file managers offer co-write for Markdown; the launcher passes the file's path or URL.
+  mimeTypes:
+    - text/markdown
   # The window's WM_CLASS matches the .desktop entry, so launchers group it with the app.
   syncDesktopName: true
   maintainer: co-write contributors

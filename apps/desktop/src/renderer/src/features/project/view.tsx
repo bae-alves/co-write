@@ -72,7 +72,7 @@ export function FilesView() {
   return (
     <section aria-label="Files" className="flex min-h-0 flex-1 flex-col">
       <SectionHeader title={project.tag === 'open' ? project.name : 'Files'}>
-        {project.tag === 'open' && (
+        {project.tag === 'open' && project.file === null && (
           <IconButton label="New file" onClick={() => workbenchIntents.openDialog('new-file')}>
             <FilePlus />
           </IconButton>
@@ -88,12 +88,25 @@ export function FilesView() {
       <div className="min-h-0 flex-1 overflow-y-auto pb-2">
         {project.tag === 'open' ? (
           project.tree.length > 0 ? (
-            <Tree
-              nodes={project.tree}
-              depth={0}
-              collapsed={project.collapsed}
-              activePath={activePath}
-            />
+            <>
+              <Tree
+                nodes={project.tree}
+                depth={0}
+                collapsed={project.collapsed}
+                activePath={activePath}
+              />
+              {project.file !== null && (
+                <div className="px-3 py-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => void projectIntents.openFileFolder()}
+                  >
+                    <FolderOpen className="size-3.5" /> Open the “{project.name}” folder
+                  </Button>
+                </div>
+              )}
+            </>
           ) : (
             <p className="px-3 py-2 text-xs text-muted-foreground">No Markdown files here yet.</p>
           )

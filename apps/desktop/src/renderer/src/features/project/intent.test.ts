@@ -21,6 +21,7 @@ function setup(overrides: Partial<ProjectRepository> = {}) {
   const repository: ProjectRepository = {
     pickAndOpen: vi.fn(async () => info),
     current: vi.fn(async () => null),
+    openFileFolder: vi.fn(async () => info),
     createFile: vi.fn(async () => {}),
     onChange: vi.fn(() => () => {}),
     ...overrides,
@@ -31,8 +32,15 @@ function setup(overrides: Partial<ProjectRepository> = {}) {
     close: vi.fn(async () => {}),
   }
   const revealSource = vi.fn()
-  const intents = createProjectIntents({ model: useProject, repository, documents, revealSource })
-  return { intents, repository, documents, revealSource }
+  const hideFiles = vi.fn()
+  const intents = createProjectIntents({
+    model: useProject,
+    repository,
+    documents,
+    revealSource,
+    hideFiles,
+  })
+  return { intents, repository, documents, revealSource, hideFiles }
 }
 
 const state = () => useProject.getState().state
@@ -45,7 +53,13 @@ describe('project intents', () => {
   it('opens a folder and closes the previous document', async () => {
     const { intents, documents } = setup()
     await intents.openFolder()
-    expect(state()).toEqual({ tag: 'open', name: 'notes', tree: info.tree, collapsed: [] })
+    expect(state()).toEqual({
+      tag: 'open',
+      name: 'notes',
+      tree: info.tree,
+      file: null,
+      collapsed: [],
+    })
     expect(documents.close).toHaveBeenCalled()
   })
 
@@ -73,6 +87,30 @@ describe('project intents', () => {
     const { intents } = setup({ current: async () => info })
     await intents.restore()
     expect(state()).toMatchObject({ tag: 'open', name: 'notes' })
+  })
+
+  it('file mode: shows only the file, with the files column hidden', async () => {
+    const fileMode: ProjectInfo = {
+      name: 'notes',
+      tree: [{ name: 'readme.md', path: 'readme.md', kind: 'file' }],
+      file: 'readme.md',
+    }
+    const { intents, documents, hideFiles } = setup({ current: async () => fileMode })
+    await intents.restore()
+    expect(state()).toMatchObject({ tag: 'open', file: 'readme.md', tree: fileMode.tree })
+    expect(hideFiles).toHaveBeenCalled()
+    expect(documents.openLocal).toHaveBeenCalledWith('readme.md')
+    expect(await intents.createFile('other')).toBe('Open a folder first.')
+
+    await intents.openFileFolder()
+    expect(state()).toMatchObject({ tag: 'open', file: null, tree: info.tree })
+    expect(documents.close).not.toHaveBeenCalled()
+  })
+
+  it('folder mode does not hide the files column', async () => {
+    const { intents, hideFiles } = setup({ current: async () => info })
+    await intents.restore()
+    expect(hideFiles).not.toHaveBeenCalled()
   })
 
   it('applies tree changes and forwards file changes to the document', async () => {

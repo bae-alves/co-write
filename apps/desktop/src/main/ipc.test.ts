@@ -37,6 +37,7 @@ type Handler = (event: IpcMainInvokeEvent, ...args: unknown[]) => Promise<unknow
 let base: string
 let root: string
 let handlers: Map<string, Handler>
+let ipc: ReturnType<typeof registerIpc>
 
 function fakeEvent(url = FILE_URL, mainFrame = true): IpcMainInvokeEvent {
   const frame = { url }
@@ -59,7 +60,7 @@ beforeEach(async () => {
   await writeFile(join(root, 'readme.md'), '# hi')
   await writeFile(join(base, 'outside.md'), 'secret')
   handlers = new Map()
-  registerIpc({
+  ipc = registerIpc({
     ipcMain: { handle: (channel: string, handler: Handler) => handlers.set(channel, handler) },
     windowFor: () => null,
     pickFolder: async () => root,
@@ -131,6 +132,33 @@ describe('registerIpc', () => {
     await call(IpcChannel.createFile, 'notes/new.md')
     expect(await readFile(join(root, 'notes', 'new.md'), 'utf8')).toBe('')
     await expect(call(IpcChannel.createFile, 'notes/new.md')).rejects.toThrow()
+  })
+
+  it('file mode: only the launched file is reachable until its folder is opened', async () => {
+    await writeFile(join(root, 'other.md'), 'other')
+    ipc.openLaunchTarget(fakeEvent().sender, { root, file: 'readme.md' })
+    expect(await call(IpcChannel.listProject)).toEqual({
+      name: 'project',
+      tree: [{ name: 'readme.md', path: 'readme.md', kind: 'file' }],
+      file: 'readme.md',
+    })
+    expect(await call(IpcChannel.readFile, 'readme.md')).toBe('# hi')
+    await expect(call(IpcChannel.readFile, 'other.md')).rejects.toThrow('Only readme.md is open')
+    await expect(call(IpcChannel.saveFile, 'other.md', 'x')).rejects.toThrow('Only readme.md')
+    await expect(call(IpcChannel.createFile, 'new.md')).rejects.toThrow('Only readme.md')
+    const otherState = { kind: 'local', path: 'other.md' }
+    await expect(call(IpcChannel.loadDocState, otherState)).rejects.toThrow('Only readme.md')
+    expect(await readFile(join(root, 'other.md'), 'utf8')).toBe('other')
+
+    const folder = await call(IpcChannel.openFileFolder)
+    expect(folder).toEqual({
+      name: 'project',
+      tree: [
+        { name: 'other.md', path: 'other.md', kind: 'file' },
+        { name: 'readme.md', path: 'readme.md', kind: 'file' },
+      ],
+    })
+    expect(await call(IpcChannel.readFile, 'other.md')).toBe('other')
   })
 
   it('round-trips document state for local and remote documents', async () => {

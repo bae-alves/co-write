@@ -46,6 +46,13 @@ describe('workbench intents', () => {
     ])
   })
 
+  it('can hide a column for this window only', () => {
+    const { intents, state, stored } = setup()
+    intents.setVisible('files', false, { remember: false })
+    expect(state()).toMatchObject({ columns: { files: false } })
+    expect(stored).toEqual([])
+  })
+
   it('never hides both source and preview', () => {
     const { intents, state, stored } = setup()
     intents.toggle('preview')

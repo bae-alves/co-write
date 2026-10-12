@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto'
 import { watch, type FSWatcher } from 'node:fs'
-import { mkdir, open, readdir, readFile, rename, stat, writeFile } from 'node:fs/promises'
-import { basename, dirname, join } from 'node:path'
+import { mkdir, open, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
+import { basename, dirname, join, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { MAX_FILE_BYTES, type FileNode, type ProjectChange } from '@co-write/shared'
 import { resolveInsideRoot, toProjectPath } from './paths'
 
@@ -44,6 +45,36 @@ export async function listTree(root: string): Promise<FileNode[]> {
   return walk(root)
 }
 
+/** What `co-write <path>` asks for: a folder to open, and maybe a file in it to show. */
+export interface LaunchTarget {
+  readonly root: string
+  readonly file: string | null
+}
+
+/**
+ * The first argument naming an existing folder or Markdown file. Accepts paths (relative ones
+ * resolve against `cwd`) and the `file://` URLs desktop launchers pass; switches are skipped.
+ * Symlinks are resolved, so the file lands inside the folder that really contains it.
+ */
+export async function launchTarget(
+  args: readonly string[],
+  cwd: string,
+): Promise<LaunchTarget | null> {
+  for (const arg of args) {
+    if (arg.startsWith('-')) continue
+    let path: string
+    try {
+      path = await realpath(arg.startsWith('file://') ? fileURLToPath(arg) : resolve(cwd, arg))
+    } catch {
+      continue
+    }
+    const info = await stat(path)
+    if (info.isDirectory()) return { root: path, file: null }
+    if (info.isFile() && isMarkdownFile(path)) return { root: dirname(path), file: basename(path) }
+  }
+  return null
+}
+
 export async function readProjectFile(root: string, path: string): Promise<string> {
   const absolute = await resolveInsideRoot(root, path)
   const info = await stat(absolute)
@@ -75,14 +106,20 @@ export async function createProjectFile(root: string, path: string): Promise<voi
  * Watches the project and reports tree changes (debounced) and changes to individual Markdown
  * files. Returns a function that stops watching.
  */
-export function watchProject(root: string, onChange: (change: ProjectChange) => void): () => void {
+export function watchProject(
+  root: string,
+  onChange: (change: ProjectChange) => void,
+  /** File mode: watch only this file (one non-recursive watch on its folder). */
+  only: string | null = null,
+): () => void {
   let timer: NodeJS.Timeout | undefined
   const changedFiles = new Set<string>()
   let watcher: FSWatcher | undefined
   try {
-    watcher = watch(root, { recursive: true }, (_event, filename) => {
+    watcher = watch(root, { recursive: only === null }, (_event, filename) => {
       if (filename) {
         const path = filename.toString().split('\\').join('/')
+        if (only !== null && path !== only) return
         if (isMarkdownFile(path) && !path.split('/').some((part) => part.startsWith('.'))) {
           changedFiles.add(path)
         }
@@ -91,7 +128,7 @@ export function watchProject(root: string, onChange: (change: ProjectChange) => 
       timer = setTimeout(() => {
         for (const path of changedFiles) onChange({ kind: 'file', path })
         changedFiles.clear()
-        void listTree(root).then((tree) => onChange({ kind: 'tree', tree }))
+        if (only === null) void listTree(root).then((tree) => onChange({ kind: 'tree', tree }))
       }, 150)
     })
     watcher.on('error', () => watcher?.close())

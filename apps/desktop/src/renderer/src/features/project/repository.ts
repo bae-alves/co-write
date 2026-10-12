@@ -6,6 +6,8 @@ export interface ProjectRepository {
   pickAndOpen(): Promise<ProjectInfo | null>
   /** The folder this window already has open (e.g. after a renderer reload). */
   current(): Promise<ProjectInfo | null>
+  /** File mode → folder mode. */
+  openFileFolder(): Promise<ProjectInfo | null>
   createFile(path: string): Promise<void>
   onChange(listener: (change: ProjectChange) => void): () => void
 }
@@ -21,6 +23,7 @@ export function createProjectRepository(): ProjectRepository {
   return {
     pickAndOpen: () => api().openProject(),
     current: async () => (await desktopApi()?.listProject()) ?? null,
+    openFileFolder: () => api().openFileFolder(),
     createFile: (path) => api().createFile(path),
     onChange: (listener) => desktopApi()?.onProjectChanged(listener) ?? noop,
   }
