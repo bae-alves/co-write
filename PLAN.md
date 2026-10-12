@@ -5,32 +5,40 @@ Derived from the design conversation: https://chatgpt.com/share/6ac7aeb9-5adc-83
 
 License: AGPL-3.0 (see `LICENSE`).
 
-## Decisions taken from the conversation
+## Status
 
-| Topic           | Decision                                                                                                                                                                                                                   |
-| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client priority | **Electron-first.** The restricted environment (filesystem, IPC, security boundary, offline) is the harder constraint (Boehm spiral); a web client later is a _deliberate reduction of capabilities_, not the base design. |
-| Renderer        | TypeScript, React, Vite, Tailwind CSS, shadcn/ui                                                                                                                                                                           |
-| Editor          | CodeMirror 6 (not Monaco, not a `<textarea>`)                                                                                                                                                                              |
-| Collaboration   | Yjs (`Y.Doc` / `Y.Text`) + WebSocket provider; CRDT semantics stay on the client                                                                                                                                           |
-| State           | **Zustand for app/UI state; Yjs for document/collaboration state.** No abstraction layer around Yjs.                                                                                                                       |
-| Backend         | Kotlin, Ktor, WebSockets, PostgreSQL (Exposed or jOOQ)                                                                                                                                                                     |
-| Preview         | Client-side only: `remark` + `rehype`, sanitized HTML. Never send rendered HTML through the collab layer — collaborate on Markdown source.                                                                                 |
-| Ktor's role     | Auth, authorization, document rooms, WebSocket relay, persistence. It does **not** understand Markdown or implement collaboration logic.                                                                                   |
+**v1 is done** (Phases 0–5, PR #1 and the follow-up on `main`): a three-column Electron editor (files, source, preview) on Yjs, a Ktor relay persisting to PostgreSQL with lossless compaction, per-document roles, presence, and Linux packages. The git history has the details. This plan now covers what comes after v1.
 
-## Decisions taken while building v1
+## Guiding rule after v1
 
-| Topic           | Decision                                                                                                                                                                                                                                                                                         |
-| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| Layout          | **Overleaf-style three columns: files, source, preview.** Each can be toggled from the top left (VS Code-style layout buttons, `Ctrl+B` / `Ctrl+Shift+E` / `Ctrl+Shift+V`); source or preview always stays.                                                                                      |
-| Scope of the UI | Deliberately small: no tabs, no plugin system, no settings screen. Files column = the open local folder plus the server's shared documents.                                                                                                                                                      |
-| Platform        | **Linux only.** AppImage and .deb; no macOS/Windows code paths or targets. Other platforms are left to people's own builds.                                                                                                                                                                      |
-| Theme           | WolfRose Dark only (not themeable yet). Every colour is a token in `styles.css`; the CodeMirror theme and syntax colours mirror the VS Code theme's `colors` / `tokenColors`.                                                                                                                    |
-| Renderer origin | Packaged builds serve the renderer from `app://co-write` (custom privileged protocol), not `file://`: a real origin for CORS and the IPC sender check, and asset reads confined to the renderer folder.                                                                                          |
-| Auth            | v1: self-managed username + password accounts (PBKDF2), opaque bearer tokens (30 days) stored only as SHA-256 hashes, kept encrypted with Electron `safeStorage`. **To be replaced in a follow-up** by PEM-key accounts + OAuth (see open questions).                                            |
-| Persistence     | Raw Yjs update log per document **plus snapshots supplied by clients** (see Phase 3). A snapshot replaces log entries only when the server has verified it contains every edit in them; otherwise it is kept as an ordinary update. The server never merges CRDT state, so it needs no Yjs port. |
-| Data layer      | Plain JDBC + HikariCP behind repositories, SQL migrations in `resources/db/` (no Exposed/jOOQ yet; nothing has needed them).                                                                                                                                                                     |
-| Y.Doc in MVI    | As proposed: the `document` feature's repository owns the `Y.Doc`, provider and persistence; its model is a DFA over `empty → loading → local \| connecting ⇄ synced ⇄ offline → closed`.                                                                                                        |
+> **Anyone can run their own co-write: one container plus PostgreSQL, configured by environment variables. The desktop app points at whichever server you choose.**
+
+Self-hosting works the way Stirling-PDF does: `docker compose up`, nothing else to set up. No official, central server is assumed anywhere in the code. Two ways to run an instance:
+
+- **`AUTH=none`: no accounts, fully offline.** For a home server, a LAN or a VPN: no sign-in, every document open to everyone who can reach the server, no outbound network calls. People pick a display name for their cursor and start writing.
+- **`AUTH=accounts`** (the default): key-based accounts, optional OAuth, per-document roles. For anything reachable from the internet.
+
+## Decisions
+
+| Topic           | Decision                                                                                                                                                                                                                                                                     |
+| --------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client priority | **Electron-first.** The restricted environment (filesystem, IPC, security boundary, offline) is the harder constraint; a web client later is a _deliberate reduction of capabilities_, not the base design.                                                                  |
+| Platform        | **Linux only.** AppImage and .deb; no macOS/Windows code paths or targets. Other platforms are left to people's own builds.                                                                                                                                                  |
+| Distribution    | Desktop: AppImage + .deb attached to GitHub Releases on every `v*` tag. **No auto-update.** Server: a container image on GHCR, self-hosted with `docker compose`.                                                                                                            |
+| Renderer        | TypeScript, React, Vite, Tailwind CSS, shadcn/ui; CodeMirror 6 (not Monaco, not a `<textarea>`).                                                                                                                                                                             |
+| Layout          | **Overleaf-style three columns: files, source, preview.** Each can be toggled from the top left (`Ctrl+B` / `Ctrl+Shift+E` / `Ctrl+Shift+V`); source or preview always stays. No tabs, no plugin system.                                                                     |
+| Theme           | WolfRose Dark only (not themeable yet). Every colour is a token in `styles.css`; the CodeMirror theme mirrors the VS Code theme.                                                                                                                                             |
+| Icon            | The Markdown mark in white (public domain, svgrepo.com): `apps/desktop/resources/icon.svg`, with `icon.png` (512²) rendered from it via `rsvg-convert`.                                                                                                                      |
+| Collaboration   | Yjs (`Y.Doc` / `Y.Text`) over WebSocket; CRDT semantics stay on the client. Zustand for app/UI state, Yjs for document state, no abstraction layer around Yjs.                                                                                                               |
+| Preview         | Client-side only: `remark` + `rehype`, sanitized, rendered to React elements. Never send rendered HTML through the collab layer.                                                                                                                                             |
+| Ktor's role     | Auth, authorization, document rooms, WebSocket relay, persistence. It does **not** understand Markdown or merge CRDT state.                                                                                                                                                  |
+| Persistence     | Raw Yjs update log per document plus snapshots supplied by clients. A snapshot replaces log entries only once the server has verified it contains every edit in them (`kit/YUpdate.kt`), so the current state is never lost. History beyond the latest snapshot is not kept. |
+| Data layer      | **Plain JDBC + HikariCP** behind repositories, SQL migrations in `resources/db/`. Exposed/jOOQ: closed, not needed.                                                                                                                                                          |
+| Auth            | v1 has username + password accounts. **They are replaced by key-based accounts (Phase 7) plus OAuth (Phase 8).** No passwords anywhere after that. Instances can also run with **no auth at all** (`AUTH=none`, Phase 6).                                                    |
+| Renderer origin | Packaged builds serve the renderer from `app://co-write`: a real origin for CORS and the IPC sender check, and asset reads confined to the renderer folder.                                                                                                                  |
+| Y.Doc in MVI    | The `document` feature's repository owns the `Y.Doc`, provider and persistence; its model is a DFA over `empty → loading → local \| connecting ⇄ synced ⇄ offline → closed`.                                                                                                 |
+
+Accepted risk: snapshots come from editors' clients, and the server checks that they are complete, not that they are honest. A malicious editor could forge one, but editors can already delete everything, and sharing a document is a matter of trust between people who know each other.
 
 ## Code architecture: MVI + Repository (both ends)
 
@@ -47,128 +55,86 @@ Enforced, not aspirational:
 
 - **Desktop:** ESLint (`eslint.config.js`) forbids `fetch`/`WebSocket`/storage/`window.api` outside `repository.ts`, and forbids the wrong-way imports per role.
 - **Server:** `ArchitectureTest` inspects imports (only `*Repository.kt` may import JDBC/Hikari/HTTP clients; models pure; routes never use repositories; intents know no Ktor).
-- Intents take their repository via a factory (`createXIntents(deps)` / constructor), so they are tested against fakes with no network or database.
-
-Reference slice (Phase 0): the `server-status` feature on the desktop and the `health` feature on the server.
-
-## Guiding rule for v1
-
-> **One Markdown document → CodeMirror → Y.Text → WebSocket → Ktor → persistence.**
-
-Everything else (multi-file projects, comments, history, awareness polish) waits until this slice works end to end.
+- Intents take their repository via a factory, so they are tested against fakes with no network or database.
 
 ## Architecture
 
 ```text
 Electron
-├── main/       window lifecycle, filesystem, native menus, persistence, IPC handlers
+├── main/       window lifecycle, filesystem, native menus, persistence, keys, IPC handlers
 ├── preload/    narrow, typed API exposed as window.api (contextBridge)
 └── renderer/   React + CodeMirror 6 + Yjs + Zustand + Tailwind + shadcn/ui
                       │
-                 WebSocket (Yjs updates)
+                 WebSocket (Yjs updates) to the server the user chose
                       │
-                    Ktor ── PostgreSQL
+           co-write container (Ktor) ── PostgreSQL
 ```
 
-Proposed repo layout (monorepo):
+### Electron security boundary (holds for everything below)
 
-```text
-co-write/
-├── apps/
-│   ├── desktop/          # Electron: src/main, src/preload, src/renderer
-│   └── server/           # Ktor (Gradle, Kotlin)
-├── packages/
-│   └── shared/           # IPC/WS message types, constants (TS) — created in Phase 1 with the IPC contract
-├── docker-compose.yml    # PostgreSQL for local dev
-├── LICENSE               # AGPL-3.0
-└── PLAN.md
-```
-
-### Electron security boundary (Phase 1 deliverable)
-
-- `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true` for every renderer.
-- Renderer has **no** Node/Electron access; only `window.api` from preload.
-- Preload exposes a small typed surface (e.g. `openFile`, `saveFile`, `listProject`, `onFileChanged`); no raw `ipcRenderer`, no generic `invoke(channel, ...)`.
-- Main validates every IPC payload (schema validation, e.g. zod), checks `event.senderFrame` origin, and restricts file access to the user-selected project root (resolve + reject path traversal/symlink escapes).
-- Strict CSP; deny `window.open` / navigation; sanitize preview HTML (`rehype-sanitize`).
-- Privileged operations stay visibly privileged in the architecture — don't abstract the Electron restrictions away prematurely.
+- `contextIsolation`, no `nodeIntegration`, `sandbox` for every renderer; the renderer reaches nothing but `window.api`.
+- The preload exposes a small typed surface; main validates every IPC payload (zod) and checks the sender frame; file access is confined to the user-picked root.
+- Strict CSP; navigation, `window.open`, `<webview>` and permission requests denied; preview HTML sanitized.
+- **New:** private keys live only in the main process. The renderer can ask main to sign a login challenge, never to read a key.
 
 ### Collaboration data flow
 
 ```text
-CodeMirror ⇄ y-codemirror.next binding ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider ⇄ Ktor ⇄ PostgreSQL
+CodeMirror ⇄ y-codemirror.next ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider ⇄ Ktor ⇄ PostgreSQL
 ```
 
-- Local edits and remote edits both go through the Yjs binding; CodeMirror is unaware of peers.
-- Undo/redo uses `Y.UndoManager` (via the binding), so undo only reverts _local_ changes, not remote ones.
-- Ephemeral state (cursors, selections, presence) uses Yjs **awareness**, never stored in the document.
-- Ktor relays binary Yjs updates per document room; persists updates/snapshots (compacted periodically); sends state on (re)connect via the Yjs sync protocol (state vector → missing updates).
+- Undo/redo uses `Y.UndoManager`, so undo only reverts _local_ changes.
+- Cursors, selections and presence use Yjs awareness, never stored in the document.
+- The server relays binary updates per room, persists the log and verified snapshots, and answers the sync handshake from the stored log.
 
 ## Phases
 
-### Phase 0 — Scaffold
+### Phase 6 — Self-hosting and releases
 
-- [x] pnpm workspace, TS config, lint/format (ESLint + architecture rules, Prettier), CI (`.github/workflows/ci.yml`).
-- [x] `apps/desktop`: Electron + electron-vite + React + Tailwind v4 + shadcn/ui, `server-status` reference feature (model/intent/repository/view + tests). Hardened window settings and CSP already in place. _Renderer verified in Chromium against the live server._
-- [x] `apps/server`: Ktor + `/health` (reference `health` feature, tests, architecture test), Gradle wrapper, `docker-compose.yml` with PostgreSQL. _Verified end to end against a real PostgreSQL 16 (503 degraded → 200 up)._
+- [x] App icon: white Markdown mark in the window, the AppImage and the .deb.
+- [x] **File mode / folder mode.** `co-write notes.md` (or double-clicking it) opens just that file: the files column starts hidden (without changing the remembered layout), only that file may be read or written, and only it is watched. Showing the files column offers "Open the … folder", which switches the window to folder mode. `co-write <folder>` and Open Folder… go straight to folder mode. Launching again opens a new window in the same process; the packages register `text/markdown`.
+- [x] `pnpm install:local` (in `apps/desktop`): installs into `~/.local` without root, adds the launcher entry and icon, and makes co-write the default app for Markdown.
+- [ ] `apps/server/Dockerfile`: multi-stage (Gradle build → JRE 21 runtime), non-root user, `HEALTHCHECK` on `/health`, all configuration from the existing environment variables (`DATABASE_*`, `PORT`, `CORS_ALLOWED_HOSTS`, `COMPACT_AFTER`).
+- [ ] **`AUTH=none` mode.** The server skips accounts and tokens: every connection is an editor of every document, the document list shows all documents, and inviting/roles are hidden. It logs a warning at startup that the instance must not be exposed publicly. `GET /api/instance` returns `{ auth: "none" | "accounts", oauth: [...] }`, so the desktop knows what to show: with `none` it asks only for a display name (stored locally, used for presence) and never shows sign-in. Accounts-only routes answer 404 in this mode. Phases 7–9 build on `accounts` mode and leave `none` untouched.
+- [ ] Fully offline: the image bundles everything it needs, the server makes no outbound calls with `AUTH=none` (OAuth is the only outbound traffic at all), and the desktop app loads nothing remote.
+- [ ] `deploy/docker-compose.yml`: the server image plus PostgreSQL with a named volume; the instance's settings in one `.env`, with `AUTH` as the first line. The root `docker-compose.yml` stays for development.
+- [ ] Runtime server choice in the desktop app (replaces the build-time `MAIN_VITE_SERVER_URL`): connecting asks for the server URL first, then for sign-in only if the instance uses accounts; credentials are stored per server; the CSP's `connect-src` follows the chosen server.
+- [ ] `.github/workflows/release.yml` on `v*` tags: builds the AppImage and .deb and attaches them to a GitHub Release; builds and pushes the server image to `ghcr.io/bae-alves/co-write-server` (`:vX.Y.Z` and `:latest`). `electron-builder` publishes no update metadata (no `latest-linux.yml`).
+- [ ] README: "Run your own server" (compose file, `.env`, `AUTH=none` for a private network vs. `AUTH=accounts` behind a TLS reverse proxy for `wss://`) and "Install the app".
 
-### Phase 1 — Local editor + security boundary
+### Phase 7 — Key-based accounts (replace passwords)
 
-- [x] Main/preload/renderer split with the hardened settings above. Plus: permission requests denied, `<webview>` blocked, all navigation blocked, renderer served from `app://co-write`.
-- [x] Typed IPC contract in `packages/shared` (`CoWriteApi`, zod schemas); every handler checks the sender frame and parses its payload. The preload imports only the dependency-free channel list.
-- [x] Open/save `.md` files via the main process — a whole folder, confined to the user-picked root (traversal, absolute paths, symlink and dangling-symlink escapes rejected; atomic writes; Markdown only). File-system changes are watched and pushed to the renderer.
-- [x] CodeMirror 6 with Markdown (+ fenced code languages); live preview (remark-gfm → rehype-sanitize → React elements, never `innerHTML`), following the editor's scroll position.
-- [x] Zustand DFA models for UI/app state (`workbench`, `project`, `document`, `preview`, `account`, `shared-docs`, `server-status`).
-- [x] Tests: IPC validation and sender checks, path restriction, `app://` resolution, every intent against fakes.
+- [ ] **Keys:** Ed25519. The desktop generates a key pair in the main process (`node:crypto`) and keeps the private key encrypted with `safeStorage`; importing and exporting an existing key as PEM (PKCS#8) is supported. The server verifies signatures with the JDK's built-in Ed25519 (`java.security`), so no new dependency.
+- [ ] **Register:** username + public key (SPKI PEM), plus a signature over a fresh challenge to prove possession.
+- [ ] **Sign in:** `POST /api/auth/challenge` returns a random, single-use nonce that expires after 60 s. The client signs `co-write-login\n<server origin>\n<nonce>`, so a signature cannot be replayed against another server. A valid signature returns the same kind of opaque session token as today (hashed at rest, 30 days).
+- [ ] **Several keys per account** (one per machine). A signed-in device can add a key (paste or import its public key) and remove keys; removing a key is how rotation works, and it ends the sessions created with that key. **No server-side recovery:** losing every key means losing the account, unless it is linked to OAuth (Phase 8).
+- [ ] Migration `V2`: drop the password columns, add `account_keys` and `login_challenges`. Existing password accounts are dropped, since nothing is deployed.
+- [ ] Desktop: the account dialog shows the key's fingerprint and offers generate, import and export; the IPC gets `keys.sign(challenge)`, validated like every other channel.
+- [ ] Tests: signature verification against keys generated by Node (fixtures, like `yjs-fixtures.json`), expired/reused/foreign-origin challenges, key removal ending its sessions.
 
-### Phase 2 — Yjs locally
+### Phase 8 — OAuth
 
-- [x] Editor backed by `Y.Doc` / `Y.Text` via y-codemirror.next; undo/redo through `Y.UndoManager` (disk loads, reloads and remote edits are not undoable).
-- [x] Yjs state persisted by main (`userData/doc-state`, debounced). Local files keep unsaved drafts across restarts (dropped if the file changed on disk meanwhile); shared documents stay editable offline, and their list is cached.
-- [x] Unit tests for local/remote update application, offline convergence and undo semantics (two in-memory `Y.Doc`s), and for the draft logic.
+- [ ] **GitHub first.** Each instance registers its own OAuth app and sets `OAUTH_GITHUB_CLIENT_ID` / `OAUTH_GITHUB_CLIENT_SECRET`; the provider is hidden when they are unset. A generic OIDC provider (`OAUTH_OIDC_*`) comes next, so instances can use Google, GitLab, Keycloak and others without code.
+- [ ] **Flow:** the desktop opens the system browser at `<server>/api/oauth/github/start?port=<loopback port>&code_challenge=<PKCE>`. The server does the provider round-trip with its own callback, so the client secret never leaves the server. It then redirects to `http://127.0.0.1:<port>/` with a one-time code, which the desktop exchanges together with its PKCE verifier for a session token.
+- [ ] **Linking:** an OAuth identity signed in for the first time creates an account; when the user is already signed in, it is linked to that account instead. Accounts can have keys, OAuth identities or both, and must always keep at least one.
+- [ ] Tests: the full flow against a fake provider; PKCE mismatch, reused one-time codes, linking and unlinking (the last sign-in method cannot be removed).
 
-### Phase 3 — Ktor relay
+### Phase 9 — Session hardening and account lifecycle
 
-- [x] `/ws/docs/{docId}`: room registry, join/leave, relay of binary updates, presence (awareness) relay with cleanup when a connection drops. Per-connection bounded outbox, so a slow client cannot stall a room.
-- [x] Sync handshake without a server-side Yjs: a client's step 1 is answered with the stored log + an empty step 2; the server then sends step 1 with an empty state vector, and the client's full-state answer carries its offline edits. The client (y-websocket) reconnects with backoff.
-- [x] Persistence: updates appended to PostgreSQL; the full-state answers above double as **snapshots** that replace the log prefix they cover (requested on every writer's join and after `COMPACT_AFTER` updates). Before deleting anything the server reads the snapshot's state vector and the replaced entries' clocks straight from the Yjs encoding (`kit/YUpdate.kt`, tested against real Yjs output) and only compacts when nothing would be lost.
-- [x] Tests: room logic with simulated peers; real WebSocket sessions (two clients, disconnect/reconnect with offline edits, compaction); JDBC repositories against PostgreSQL; and an end-to-end suite with real Yjs clients (`pnpm test:e2e`).
+- [ ] **WebSocket tickets:** `POST /api/ws-ticket` (authenticated) returns a ticket for one document that is valid once and for 30 s. The socket connects with `?ticket=`, so the session token never appears in a URL or a proxy log.
+- [ ] **Role changes apply immediately:** changing a member's role closes their open sockets with a reconnectable code, and the reconnect picks up the new role; removing a member (new `DELETE /api/docs/{id}/members/{username}`) ends with 4403 as today.
+- [ ] **Rate limiting:** Ktor's `RateLimit` plugin, per client IP, on the challenge, sign-in, OAuth and ticket endpoints. `TRUST_PROXY=true` makes the server read the IP from `X-Forwarded-For` behind a reverse proxy.
+- [ ] **Account deletion:** `DELETE /api/me` removes keys, OAuth links, sessions and memberships. Documents the user owns alone are deleted with the account; the desktop says so and lists them before confirming. Transfer ownership first to keep them.
+- [ ] Tests for each, including a role change during a live session.
 
-### Phase 4 — Auth & permissions
+### Later (not scheduled)
 
-- [x] Token auth on the WebSocket upgrade (`?token=`); per-document roles owner/editor/viewer. Refusals use close codes 4401/4403/4404, which y-websocket treats as final.
-- [x] Document identity (random 128-bit ids) and API: list, create, invite/change role (owner only).
-- [x] Viewer role enforced server-side (updates and full states from read-only sockets are dropped) and in the editor (read-only).
-
-### Phase 5 — Presence & polish
-
-- [x] Awareness: remote cursors/selections with names (y-codemirror.next), collaborator avatars in the status bar.
-- [x] Status bar (saved/unsaved, connecting/synced/offline, server health), native menus with shortcuts, window lifecycle.
-- [x] Packaging: `electron-builder.yml` for Linux (AppImage, deb). _Built and launched here; no icons yet._
-
-### Later / explicitly out of scope for v1
-
-- Server-side multi-file projects (a shared _folder_), asset handling (images/diagrams), file rename/delete conflict semantics. Local folders are in v1 because the files column needs them.
-- Comments/annotations (`Y.Array`/`Y.Map`), document history/versioning.
-- Web client as a capability-reduced build of the same renderer.
-- Themes other than WolfRose Dark (the tokens are ready for it).
+- Server-side multi-file projects (a shared _folder_), images and other assets, rename/delete conflict semantics.
+- Comments/annotations, document history/versioning (this would also make forged snapshots recoverable).
+- Web client as a capability-reduced build of the same renderer, served by the same container.
+- Themes other than WolfRose Dark (the tokens are ready).
 
 ## Open questions
 
-Answered:
-
-- Auth provider: Self-managed accounts + Oauth. Keeping in mind self-managed is not user+password based, it's pem key based.
-- Persistence format: whatever guarantees people won't lose their work > the most efficient.
-- Target platform is Linux
-- Where the `Y.Doc` lives in MVI terms: proposal is that the editor feature's repository owns the `Y.Doc` + WebSocket provider, and the model holds only a DFA over the connection/session (`connecting → synced → offline …`); CodeMirror binds to the doc through the repository. (Yes. This)
-
-Applied: Linux only; compaction deletes history only once the server has verified the snapshot holds every replaced edit, so the current state is never lost. **Follow-up:** PEM-key accounts + OAuth replace the v1 username/password accounts.
-
-Still open:
-
-- Exposed vs. jOOQ for the Ktor data layer (plain JDBC + HikariCP behind the repositories so far).
-- Revoking access for a connected socket: role changes apply on the next connection today.
-- Session token in the WebSocket query string (browsers cannot set headers on upgrade): fine over `wss://`, but a short-lived ticket endpoint would keep it out of proxy logs.
-- Snapshots come from editors' clients. The server verifies they contain every replaced edit, but not that their content is honest: a malicious editor could forge one. Editors can already delete everything, so this widens nothing today; history beyond the latest snapshot is not kept.
-- Rate limiting, account deletion, key rotation.
-- Icons for the packaged app.
+- Which of the "Later" items comes first after Phase 9?
+- OAuth providers beyond GitHub + generic OIDC: any that must be first-class?
