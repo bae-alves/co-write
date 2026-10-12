@@ -5,6 +5,7 @@ import { accountIntents } from '@/features/account/intent'
 import { useAccount } from '@/features/account/model'
 import { isOpen, isRemoteOpen, useDocument } from '@/features/document/model'
 import { useProject } from '@/features/project/model'
+import { useServerStatus } from '@/features/server-status/model'
 import { ColumnToggles } from '@/features/workbench/view'
 import { workbenchIntents } from '@/features/workbench/intent'
 
@@ -13,8 +14,10 @@ export function Toolbar() {
   const account = useAccount((s) => s.state)
   const document = useDocument((s) => s.state)
   const project = useProject((s) => s.state)
+  const online = useServerStatus((s) => s.state.tag === 'online')
 
   const canShare =
+    online &&
     account.tag === 'signedIn' &&
     (document.tag === 'local' || (isRemoteOpen(document) && document.role === 'owner'))
   const location =
@@ -56,14 +59,16 @@ export function Toolbar() {
           </IconButton>
         </div>
       ) : (
-        <Button
-          size="sm"
-          variant="ghost"
-          disabled={account.tag !== 'signedOut'}
-          onClick={() => workbenchIntents.openDialog('sign-in')}
-        >
-          Sign in
-        </Button>
+        online && (
+          <Button
+            size="sm"
+            variant="ghost"
+            disabled={account.tag !== 'signedOut'}
+            onClick={() => workbenchIntents.openDialog('sign-in')}
+          >
+            Sign in
+          </Button>
+        )
       )}
     </header>
   )
