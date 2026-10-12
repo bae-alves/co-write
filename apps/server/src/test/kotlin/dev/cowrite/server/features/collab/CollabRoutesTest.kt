@@ -65,7 +65,7 @@ private suspend fun DefaultClientWebSocketSession.handshake(fullState: ByteArray
 }
 
 /** Waits until the server has handled every frame sent so far (it handles a socket's frames in order). */
-private suspend fun DefaultClientWebSocketSession.flush() {
+private suspend fun DefaultClientWebSocketSession.awaitHandled() {
     handshake()
 }
 
@@ -131,7 +131,7 @@ class CollabRoutesTest {
                 answerStateRequest(YProtocol.EMPTY_UPDATE)
                 send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana1)))
                 send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana2)))
-                flush()
+                awaitHandled()
 
                 // bo edited offline. It joins, gets ana's edits, and answers with its full state.
                 ws.webSocket("/ws/docs/$id?token=$bo") {
@@ -142,7 +142,7 @@ class CollabRoutesTest {
                 // ana receives bo's offline edit (inside its full state).
                 assertContentEquals(YjsFixtures.boFull, expect<Message.Update>().update)
                 send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana3)))
-                flush()
+                awaitHandled()
             }
 
             // A fresh client gets the compacted log: bo's snapshot, then ana's later edit.
@@ -168,10 +168,10 @@ class CollabRoutesTest {
                     handshake()
                     send(Frame.Binary(true, YProtocol.update(u(66))))
                     send(Frame.Binary(true, YProtocol.syncStep2(u(67))))
-                    flush()
+                    awaitHandled()
                 }
                 send(Frame.Binary(true, YProtocol.update(u(1))))
-                flush()
+                awaitHandled()
             }
             ws.webSocket("/ws/docs/$id?token=$ana") {
                 assertEquals(listOf(listOf<Byte>(1)), handshake().map { it.toList() })
