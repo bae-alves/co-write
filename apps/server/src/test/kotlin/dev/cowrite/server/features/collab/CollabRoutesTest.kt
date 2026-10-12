@@ -1,6 +1,7 @@
 package dev.cowrite.server.features.collab
 
 import dev.cowrite.server.FakeDatabase
+import dev.cowrite.server.YjsFixtures
 import dev.cowrite.server.features.auth.postJson
 import dev.cowrite.server.features.auth.register
 import dev.cowrite.server.kit.YProtocol
@@ -123,31 +124,23 @@ class CollabRoutesTest {
             ws.webSocket("/ws/docs/$id?token=$ana") {
                 handshake()
                 answerStateRequest(YProtocol.EMPTY_UPDATE)
-                send(Frame.Binary(true, YProtocol.update(u(1))))
+                send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana1)))
+                send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana2)))
 
-                // bo joins, gets ana's edit, and sends one back.
+                // bo edited offline. It joins, gets ana's edits, and answers with its full state.
                 ws.webSocket("/ws/docs/$id?token=$bo") {
-                    assertContentEquals(u(1), handshake().single())
-                    answerStateRequest(u(1))
-                    send(Frame.Binary(true, YProtocol.update(u(2))))
+                    val replayed = handshake().map { it.toList() }
+                    assertEquals(listOf(YjsFixtures.ana1.toList(), YjsFixtures.ana2.toList()), replayed)
+                    answerStateRequest(YjsFixtures.boFull)
                 }
-                // ana receives bo's full state (the server relays it), then bo's update.
-                assertContentEquals(u(1), expect<Message.Update>().update)
-                assertContentEquals(u(2), expect<Message.Update>().update)
-
-                // bo is offline now and keeps editing locally ([3]). Meanwhile ana edits ([4]).
-                send(Frame.Binary(true, YProtocol.update(u(4))))
+                // ana receives bo's offline edit (inside its full state).
+                assertContentEquals(YjsFixtures.boFull, expect<Message.Update>().update)
+                send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana3)))
             }
 
-            ws.webSocket("/ws/docs/$id?token=$bo") {
-                // The log, compacted at bo's last join: snapshot [1], then [2], [4].
-                assertEquals(listOf(listOf<Byte>(1), listOf<Byte>(2), listOf<Byte>(4)), handshake().map { it.toList() })
-                // bo's full state includes its offline edit.
-                answerStateRequest(u(1, 2, 3, 4))
-            }
-
+            // A fresh client gets the compacted log: bo's snapshot, then ana's later edit.
             ws.webSocket("/ws/docs/$id?token=$ana") {
-                assertEquals(listOf(listOf<Byte>(1, 2, 3, 4)), handshake().map { it.toList() })
+                assertEquals(listOf(YjsFixtures.boFull.toList(), YjsFixtures.ana3.toList()), handshake().map { it.toList() })
             }
         }
 

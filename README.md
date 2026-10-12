@@ -41,7 +41,7 @@ CO_WRITE_E2E_SERVER=http://localhost:8080 pnpm test:e2e  # real Yjs clients agai
 ## Package
 
 ```sh
-pnpm package                       # installers for the host OS into apps/desktop/dist
+pnpm package                       # Linux AppImage + .deb into apps/desktop/dist (Linux is the only target)
 ```
 
 ## Layout

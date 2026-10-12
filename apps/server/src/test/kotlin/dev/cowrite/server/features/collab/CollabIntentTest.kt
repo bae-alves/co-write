@@ -1,6 +1,7 @@
 package dev.cowrite.server.features.collab
 
 import dev.cowrite.server.FakeDatabase
+import dev.cowrite.server.YjsFixtures
 import dev.cowrite.server.kit.YProtocol
 import dev.cowrite.server.kit.YProtocol.AwarenessEntry
 import dev.cowrite.server.kit.YProtocol.Message
@@ -103,34 +104,69 @@ class CollabIntentTest {
             val bo = FakePeer(2)
             collab.connect(ana)
             collab.receive(doc, ana, YProtocol.syncStep2(YProtocol.EMPTY_UPDATE)) // nothing local yet
-            collab.receive(doc, ana, YProtocol.update(u(1)))
-            collab.receive(doc, ana, YProtocol.update(u(2)))
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana1))
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana2))
 
             // bo was offline and edited; on connect it gets the log, then answers our step 1.
             collab.connect(bo)
-            assertEquals(listOf(listOf<Byte>(1), listOf<Byte>(2)), bo.take().updates())
+            assertEquals(listOf(YjsFixtures.ana1.toList(), YjsFixtures.ana2.toList()), bo.take().updates())
             ana.take()
-            collab.receive(doc, bo, YProtocol.syncStep2(u(1, 2, 3))) // its full state: log + offline edit
+            collab.receive(doc, bo, YProtocol.syncStep2(YjsFixtures.boFull)) // the log + its offline edit
 
-            assertEquals(listOf(listOf<Byte>(1, 2, 3)), ana.take().updates(), "offline edits reach others")
-            assertEquals(listOf(2L to listOf<Byte>(1, 2, 3)), log(), "the snapshot replaced updates 1..2")
+            assertEquals(listOf(YjsFixtures.boFull.toList()), ana.take().updates(), "offline edits reach others")
+            assertEquals(listOf(2L to YjsFixtures.boFull.toList()), log(), "the snapshot replaced updates 1..2")
 
-            collab.receive(doc, ana, YProtocol.update(u(4)))
-            assertEquals(listOf(2L to listOf<Byte>(1, 2, 3), 3L to listOf<Byte>(4)), log())
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana3))
+            assertEquals(listOf(2L to YjsFixtures.boFull.toList(), 3L to YjsFixtures.ana3.toList()), log())
+        }
+
+    @Test
+    fun `keeps history a snapshot does not cover`() =
+        runBlocking {
+            val collab = CollabIntents(db.collab)
+            val ana = FakePeer(1)
+            val bo = FakePeer(2)
+            collab.connect(ana)
+            collab.receive(doc, ana, YProtocol.syncStep2(YProtocol.EMPTY_UPDATE))
+            listOf(YjsFixtures.ana1, YjsFixtures.ana2, YjsFixtures.ana3).forEach {
+                collab.receive(doc, ana, YProtocol.update(it))
+            }
+
+            // bo answers with a state that lacks ana's third edit (a buggy or stale client).
+            collab.connect(bo)
+            collab.receive(doc, bo, YProtocol.syncStep2(YjsFixtures.anaFull))
+
+            assertEquals(listOf(1L, 2L, 3L, 4L), log().map { it.first }, "nothing deleted; the state is kept as an update")
+            assertEquals(YjsFixtures.anaFull.toList(), log().last().second)
+        }
+
+    @Test
+    fun `never compacts with something that is not a Yjs update`() =
+        runBlocking {
+            val collab = CollabIntents(db.collab)
+            val ana = FakePeer(1)
+            val bo = FakePeer(2)
+            collab.connect(ana)
+            collab.receive(doc, ana, YProtocol.syncStep2(YProtocol.EMPTY_UPDATE))
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana1))
+            collab.connect(bo)
+            collab.receive(doc, bo, YProtocol.syncStep2(u(1, 2, 3)))
+            assertEquals(listOf(1L, 2L), log().map { it.first })
         }
 
     @Test
     fun `asks for a snapshot after enough updates`() =
         runBlocking {
-            val collab = CollabIntents(db.collab, compactAfter = 3)
+            val collab = CollabIntents(db.collab, compactAfter = 2)
             val ana = FakePeer(1)
             collab.connect(ana)
             collab.receive(doc, ana, YProtocol.syncStep2(YProtocol.EMPTY_UPDATE))
             ana.take()
-            repeat(3) { collab.receive(doc, ana, YProtocol.update(u(it))) }
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana1))
+            collab.receive(doc, ana, YProtocol.update(YjsFixtures.ana2))
             assertTrue(ana.take().last() is Message.SyncStep1)
-            collab.receive(doc, ana, YProtocol.syncStep2(u(9, 9)))
-            assertEquals(listOf(3L to listOf<Byte>(9, 9)), log())
+            collab.receive(doc, ana, YProtocol.syncStep2(YjsFixtures.anaFull))
+            assertEquals(listOf(2L to YjsFixtures.anaFull.toList()), log())
         }
 
     @Test

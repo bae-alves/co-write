@@ -20,16 +20,17 @@ License: AGPL-3.0 (see `LICENSE`).
 
 ## Decisions taken while building v1
 
-| Topic           | Decision                                                                                                                                                                                                    |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Layout          | **Overleaf-style three columns: files, source, preview.** Each can be toggled from the top left (VS Code-style layout buttons, `Ctrl+B` / `Ctrl+Shift+E` / `Ctrl+Shift+V`); source or preview always stays. |
-| Scope of the UI | Deliberately small: no tabs, no plugin system, no settings screen. Files column = the open local folder plus the server's shared documents.                                                                 |
-| Theme           | WolfRose Dark only (not themeable yet). Every colour is a token in `styles.css`; the CodeMirror theme and syntax colours mirror the VS Code theme's `colors` / `tokenColors`.                               |
-| Renderer origin | Packaged builds serve the renderer from `app://co-write` (custom privileged protocol), not `file://`: a real origin for CORS and the IPC sender check, and asset reads confined to the renderer folder.     |
-| Auth            | Self-managed accounts. PBKDF2-HMAC-SHA256 password hashes; opaque random bearer tokens (30 days), stored only as SHA-256 hashes. The token is kept encrypted with Electron `safeStorage`.                   |
-| Persistence     | Raw Yjs update log per document **plus snapshots supplied by clients** (see Phase 3). The server never merges CRDT state, so it needs no Yjs port.                                                          |
-| Data layer      | Plain JDBC + HikariCP behind repositories, SQL migrations in `resources/db/` (no Exposed/jOOQ yet; nothing has needed them).                                                                                |
-| Y.Doc in MVI    | As proposed: the `document` feature's repository owns the `Y.Doc`, provider and persistence; its model is a DFA over `empty → loading → local \| connecting ⇄ synced ⇄ offline → closed`.                   |
+| Topic           | Decision                                                                                                                                                                                                                                                                                         |
+| --------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Layout          | **Overleaf-style three columns: files, source, preview.** Each can be toggled from the top left (VS Code-style layout buttons, `Ctrl+B` / `Ctrl+Shift+E` / `Ctrl+Shift+V`); source or preview always stays.                                                                                      |
+| Scope of the UI | Deliberately small: no tabs, no plugin system, no settings screen. Files column = the open local folder plus the server's shared documents.                                                                                                                                                      |
+| Platform        | **Linux only.** AppImage and .deb; no macOS/Windows code paths or targets. Other platforms are left to people's own builds.                                                                                                                                                                      |
+| Theme           | WolfRose Dark only (not themeable yet). Every colour is a token in `styles.css`; the CodeMirror theme and syntax colours mirror the VS Code theme's `colors` / `tokenColors`.                                                                                                                    |
+| Renderer origin | Packaged builds serve the renderer from `app://co-write` (custom privileged protocol), not `file://`: a real origin for CORS and the IPC sender check, and asset reads confined to the renderer folder.                                                                                          |
+| Auth            | v1: self-managed username + password accounts (PBKDF2), opaque bearer tokens (30 days) stored only as SHA-256 hashes, kept encrypted with Electron `safeStorage`. **To be replaced in a follow-up** by PEM-key accounts + OAuth (see open questions).                                            |
+| Persistence     | Raw Yjs update log per document **plus snapshots supplied by clients** (see Phase 3). A snapshot replaces log entries only when the server has verified it contains every edit in them; otherwise it is kept as an ordinary update. The server never merges CRDT state, so it needs no Yjs port. |
+| Data layer      | Plain JDBC + HikariCP behind repositories, SQL migrations in `resources/db/` (no Exposed/jOOQ yet; nothing has needed them).                                                                                                                                                                     |
+| Y.Doc in MVI    | As proposed: the `document` feature's repository owns the `Y.Doc`, provider and persistence; its model is a DFA over `empty → loading → local \| connecting ⇄ synced ⇄ offline → closed`.                                                                                                        |
 
 ## Code architecture: MVI + Repository (both ends)
 
@@ -130,7 +131,7 @@ CodeMirror ⇄ y-codemirror.next binding ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider �
 
 - [x] `/ws/docs/{docId}`: room registry, join/leave, relay of binary updates, presence (awareness) relay with cleanup when a connection drops. Per-connection bounded outbox, so a slow client cannot stall a room.
 - [x] Sync handshake without a server-side Yjs: a client's step 1 is answered with the stored log + an empty step 2; the server then sends step 1 with an empty state vector, and the client's full-state answer carries its offline edits. The client (y-websocket) reconnects with backoff.
-- [x] Persistence: updates appended to PostgreSQL; the full-state answers above double as **snapshots** that replace the log prefix they cover (requested on every writer's join and after `COMPACT_AFTER` updates).
+- [x] Persistence: updates appended to PostgreSQL; the full-state answers above double as **snapshots** that replace the log prefix they cover (requested on every writer's join and after `COMPACT_AFTER` updates). Before deleting anything the server reads the snapshot's state vector and the replaced entries' clocks straight from the Yjs encoding (`kit/YUpdate.kt`, tested against real Yjs output) and only compacts when nothing would be lost.
 - [x] Tests: room logic with simulated peers; real WebSocket sessions (two clients, disconnect/reconnect with offline edits, compaction); JDBC repositories against PostgreSQL; and an end-to-end suite with real Yjs clients (`pnpm test:e2e`).
 
 ### Phase 4 — Auth & permissions
@@ -143,7 +144,7 @@ CodeMirror ⇄ y-codemirror.next binding ⇄ Y.Text ⇄ Y.Doc ⇄ WS provider �
 
 - [x] Awareness: remote cursors/selections with names (y-codemirror.next), collaborator avatars in the status bar.
 - [x] Status bar (saved/unsaved, connecting/synced/offline, server health), native menus with shortcuts, window lifecycle.
-- [x] Packaging: `electron-builder.yml` for macOS (dmg), Windows (nsis) and Linux (AppImage, deb). _Linux build produced and launched here; macOS/Windows untested; no icons or code signing yet._
+- [x] Packaging: `electron-builder.yml` for Linux (AppImage, deb). _Built and launched here; no icons yet._
 
 ### Later / explicitly out of scope for v1
 
@@ -161,13 +162,13 @@ Answered:
 - Target platform is Linux
 - Where the `Y.Doc` lives in MVI terms: proposal is that the editor feature's repository owns the `Y.Doc` + WebSocket provider, and the model holds only a DFA over the connection/session (`connecting → synced → offline …`); CodeMirror binds to the doc through the repository. (Yes. This)
 
-**Not yet reflected in the code** (v1 above predates these answers): accounts are username + password, not PEM keys, and there is no OAuth; compaction deletes the update prefix that a client-supplied snapshot replaces, which trades safety for size; packaging is configured for macOS and Windows too.
+Applied: Linux only; compaction deletes history only once the server has verified the snapshot holds every replaced edit, so the current state is never lost. **Follow-up:** PEM-key accounts + OAuth replace the v1 username/password accounts.
 
 Still open:
 
 - Exposed vs. jOOQ for the Ktor data layer (plain JDBC + HikariCP behind the repositories so far).
 - Revoking access for a connected socket: role changes apply on the next connection today.
 - Session token in the WebSocket query string (browsers cannot set headers on upgrade): fine over `wss://`, but a short-lived ticket endpoint would keep it out of proxy logs.
-- Snapshots come from editors' clients; a malicious editor could submit a bogus full state. Editors can already delete everything, but history would need server-side Yjs to verify.
+- Snapshots come from editors' clients. The server verifies they contain every replaced edit, but not that their content is honest: a malicious editor could forge one. Editors can already delete everything, so this widens nothing today; history beyond the latest snapshot is not kept.
 - Rate limiting, account deletion, key rotation.
 - Icons for the packaged app.

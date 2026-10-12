@@ -87,11 +87,7 @@ void app.whenReady().then(() => {
   installMenu(Boolean(DEV_URL))
 
   createWindow()
-  app.on('activate', () => {
-    if (BrowserWindow.getAllWindows().length === 0) createWindow()
-  })
 })
 
-app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit()
-})
+// Linux only: closing the last window quits.
+app.on('window-all-closed', () => app.quit())

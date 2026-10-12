@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit -p tsconfig.node.json && tsc --noEmit -p tsconfig.web.json",
     "test": "vitest run",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
-    "package": "electron-vite build && electron-builder"
+    "package": "electron-vite build && electron-builder --linux"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
@@ -69,5 +69,6 @@
     "type": "git",
     "url": "https://github.com/bae-alves/co-write.git",
     "directory": "apps/desktop"
-  }
+  },
+  "desktopName": "co-write.desktop"
 }

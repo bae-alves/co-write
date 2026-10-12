@@ -7,29 +7,27 @@ const send = (command: MenuCommand) => () => {
 
 /** Native menus. Items that act on the document are forwarded to the focused renderer. */
 export function installMenu(isDev: boolean): void {
-  const isMac = process.platform === 'darwin'
   const template: MenuItemConstructorOptions[] = [
-    ...(isMac ? [{ role: 'appMenu' as const }] : []),
     {
       label: 'File',
       submenu: [
-        { label: 'Open Folder…', accelerator: 'CmdOrCtrl+O', click: send('open-folder') },
-        { label: 'New File…', accelerator: 'CmdOrCtrl+N', click: send('new-file') },
+        { label: 'Open Folder…', accelerator: 'Ctrl+O', click: send('open-folder') },
+        { label: 'New File…', accelerator: 'Ctrl+N', click: send('new-file') },
         { type: 'separator' },
-        { label: 'Save', accelerator: 'CmdOrCtrl+S', click: send('save') },
+        { label: 'Save', accelerator: 'Ctrl+S', click: send('save') },
         { type: 'separator' },
-        isMac ? { role: 'close' } : { role: 'quit' },
+        { role: 'quit' },
       ],
     },
     { role: 'editMenu' },
     {
       label: 'View',
       submenu: [
-        { label: 'Toggle Files', accelerator: 'CmdOrCtrl+B', click: send('toggle-files') },
-        { label: 'Toggle Source', accelerator: 'CmdOrCtrl+Shift+E', click: send('toggle-source') },
+        { label: 'Toggle Files', accelerator: 'Ctrl+B', click: send('toggle-files') },
+        { label: 'Toggle Source', accelerator: 'Ctrl+Shift+E', click: send('toggle-source') },
         {
           label: 'Toggle Preview',
-          accelerator: 'CmdOrCtrl+Shift+V',
+          accelerator: 'Ctrl+Shift+V',
           click: send('toggle-preview'),
         },
         { type: 'separator' },

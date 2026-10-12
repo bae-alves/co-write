@@ -3,6 +3,7 @@ package dev.cowrite.server.features.collab
 import dev.cowrite.server.kit.YProtocol
 import dev.cowrite.server.kit.YProtocol.AwarenessEntry
 import dev.cowrite.server.kit.YProtocol.Message
+import dev.cowrite.server.kit.YUpdate
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 
@@ -21,8 +22,9 @@ interface Peer {
  *  - A connecting peer's sync step 1 is answered with every stored update, then an (empty) sync
  *    step 2 so it knows it is in sync, then our own sync step 1 with an empty state vector. Its
  *    answer is its full state: that carries edits made offline to the server, and — since it was
- *    requested after the replay — it contains every stored update, so it replaces them as a
- *    snapshot (compaction).
+ *    requested after the replay — it should contain every stored update, so it replaces them as
+ *    a snapshot (compaction). The server checks that it does ([YUpdate.covers]) before deleting
+ *    anything; a snapshot that falls short is stored as an ordinary update instead.
  *  - Every update from a writer is appended to the log and relayed to the other peers.
  *  - After [compactAfter] updates the server asks a writer for its full state again.
  *  - Viewers receive everything; their updates are dropped.
@@ -167,6 +169,9 @@ class CollabIntents(
         val done = state.copy(peers = state.peers + (peer.id to me.copy(snapshotUpTo = null)))
         if (update.contentEquals(YProtocol.EMPTY_UPDATE)) return done
         if (upTo == null) return storeUpdate(room, done, peer, me, update)
+        // Only replace history the snapshot provably contains; otherwise keep it as an update.
+        val replaced = repository.load(room.documentId).filter { it.seq <= upTo }.map { it.data }
+        if (!YUpdate.covers(update, replaced)) return storeUpdate(room, done, peer, me, update)
         repository.compact(room.documentId, upTo, update)
         room.broadcast(YProtocol.update(update), except = peer.id)
         return done.copy(sinceSnapshot = (state.lastSeq - upTo).toInt())
