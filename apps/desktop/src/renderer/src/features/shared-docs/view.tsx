@@ -4,6 +4,7 @@ import { Button } from '@/components/ui/button'
 import { IconButton, ListRow, SectionHeader } from '@/components/ui/section'
 import { useAccount } from '@/features/account/model'
 import { useDocument } from '@/features/document/model'
+import { useServerStatus } from '@/features/server-status/model'
 import { workbenchIntents } from '@/features/workbench/intent'
 import { cn } from '@/lib/utils'
 import { sharedDocsIntents } from './intent'
@@ -14,12 +15,16 @@ export function SharedDocsView() {
   const docs = useSharedDocs((s) => s.state)
   const account = useAccount((s) => s.state)
   const document = useDocument((s) => s.state)
+  const online = useServerStatus((s) => s.state.tag === 'online')
   const activeId = 'ref' in document && document.ref.kind === 'remote' ? document.ref.docId : null
 
   useEffect(() => {
     void sharedDocsIntents.refresh()
     return sharedDocsIntents.listen()
   }, [])
+
+  // No server and no account: nothing here can work, so don't offer it.
+  if (!online && account.tag !== 'signedIn') return null
 
   return (
     <section
