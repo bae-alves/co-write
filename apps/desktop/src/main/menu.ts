@@ -19,7 +19,26 @@ export function installMenu(isDev: boolean): void {
         { role: 'quit' },
       ],
     },
-    { role: 'editMenu' },
+    {
+      label: 'Edit',
+      submenu: [
+        // Shortcuts only shown: the editor's keymap (and text fields natively) handle the keys.
+        { label: 'Undo', accelerator: 'Ctrl+Z', registerAccelerator: false, click: send('undo') },
+        {
+          label: 'Redo',
+          accelerator: 'Ctrl+Shift+Z',
+          registerAccelerator: false,
+          click: send('redo'),
+        },
+        { type: 'separator' },
+        { role: 'cut' },
+        { role: 'copy' },
+        { role: 'paste' },
+        { role: 'delete' },
+        { type: 'separator' },
+        { role: 'selectAll' },
+      ],
+    },
     {
       label: 'View',
       submenu: [

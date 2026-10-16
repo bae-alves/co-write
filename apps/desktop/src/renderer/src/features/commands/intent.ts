@@ -4,6 +4,14 @@ import { projectIntents } from '@/features/project/intent'
 import { workbenchIntents } from '@/features/workbench/intent'
 import { commandsRepository, type CommandsRepository } from './repository'
 
+/** Undoes the open document, unless a text field (search, dialog) has focus. */
+function history(action: 'undo' | 'redo') {
+  return () => {
+    if (document.activeElement?.matches('input, textarea')) document.execCommand(action)
+    else documentIntents.binding()?.undoManager[action]()
+  }
+}
+
 export interface CommandsDeps {
   readonly repository: CommandsRepository
   readonly run: Record<MenuCommand, () => void>
@@ -27,6 +35,8 @@ export const commandIntents = createCommandIntents({
     'open-folder': () => void projectIntents.openFolder(),
     'new-file': () => workbenchIntents.openDialog('new-file'),
     save: () => void documentIntents.save(),
+    undo: history('undo'),
+    redo: history('redo'),
     'toggle-files': () => workbenchIntents.toggle('files'),
     'toggle-source': () => workbenchIntents.toggle('source'),
     'toggle-preview': () => workbenchIntents.toggle('preview'),
