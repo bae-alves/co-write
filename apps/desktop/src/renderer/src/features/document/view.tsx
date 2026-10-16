@@ -1,6 +1,6 @@
 import { Compartment, EditorState } from '@codemirror/state'
-import { EditorView as CodeMirror } from '@codemirror/view'
-import { yCollab } from 'y-codemirror.next'
+import { EditorView as CodeMirror, keymap } from '@codemirror/view'
+import { yCollab, yUndoManagerKeymap } from 'y-codemirror.next'
 import { useEffect, useRef, type ReactNode } from 'react'
 import { previewIntents } from '@/features/preview/intent'
 import { markdownEditorExtensions } from '@/kit/codemirror'
@@ -41,6 +41,8 @@ export function SourceView() {
         extensions: [
           markdownEditorExtensions(),
           yCollab(binding.ytext, binding.awareness, { undoManager: binding.undoManager }),
+          // yCollab only handles native historyUndo/Redo input events, which Chromium never fires for CodeMirror.
+          keymap.of(yUndoManagerKeymap),
           editable.current.of(EditorState.readOnly.of(false)),
           followScroll(),
         ],

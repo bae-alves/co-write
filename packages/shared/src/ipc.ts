@@ -39,6 +39,8 @@ export const MenuCommandSchema = z.enum([
   'open-folder',
   'new-file',
   'save',
+  'undo',
+  'redo',
   'toggle-files',
   'toggle-source',
   'toggle-preview',
