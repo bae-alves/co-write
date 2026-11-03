@@ -1,0 +1,45 @@
+# A co-write server and its database. Configure `.env` (copy .env.example), then:
+#   docker compose up -d
+# The root docker-compose.yml next to this folder is for development only.
+services:
+  server:
+    image: ghcr.io/bae-alves/co-write-server:${IMAGE_TAG:-latest}
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    ports:
+      - '${PORT:-8080}:8080'
+    environment:
+      AUTH: ${AUTH:-accounts}
+      PUBLIC_URL: ${PUBLIC_URL:-}
+      TRUST_PROXY: ${TRUST_PROXY:-false}
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-30}
+      COMPACT_AFTER: ${COMPACT_AFTER:-200}
+      DATABASE_URL: jdbc:postgresql://postgres:5432/cowrite
+      DATABASE_USER: cowrite
+      DATABASE_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+      OAUTH_GITHUB_CLIENT_ID: ${OAUTH_GITHUB_CLIENT_ID:-}
+      OAUTH_GITHUB_CLIENT_SECRET: ${OAUTH_GITHUB_CLIENT_SECRET:-}
+      OAUTH_OIDC_ISSUER: ${OAUTH_OIDC_ISSUER:-}
+      OAUTH_OIDC_CLIENT_ID: ${OAUTH_OIDC_CLIENT_ID:-}
+      OAUTH_OIDC_CLIENT_SECRET: ${OAUTH_OIDC_CLIENT_SECRET:-}
+      OAUTH_OIDC_NAME: ${OAUTH_OIDC_NAME:-Single sign-on}
+
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: cowrite
+      POSTGRES_USER: cowrite
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U cowrite -d cowrite']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:

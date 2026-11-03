@@ -50,3 +50,14 @@ jobs:
       - run: ./gradlew test
         env:
           TEST_DATABASE_URL: jdbc:postgresql://localhost:5432/cowrite_test
+
+  # The release workflow pushes this image on tags; building it here keeps the Dockerfile honest.
+  docker:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/build-push-action@v6
+        with:
+          context: apps/server
+          push: false

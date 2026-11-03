@@ -1,6 +1,7 @@
 #!/bin/sh
 # Installs the packaged app for the current user (no root): ~/.local/opt/co-write, a `co-write`
-# command, a launcher entry with the icon, and co-write as the default app for Markdown.
+# command, a launcher entry with the icon, and co-write as the default app for Markdown (it is
+# offered under "Open with" for the other formats, but never made their default).
 # Run `pnpm install:local` from apps/desktop; re-run it to update.
 set -eu
 
@@ -21,13 +22,13 @@ cp "$here/resources/icon.png" "$data/icons/hicolor/512x512/apps/co-write.png"
 cat > "$data/applications/co-write.desktop" <<DESKTOP
 [Desktop Entry]
 Name=co-write
-Comment=Collaborative Markdown editor
+Comment=Collaborative Markdown and text editor
 Exec=$opt/co-write %U
 Icon=co-write
 Terminal=false
 Type=Application
 StartupWMClass=co-write
-MimeType=text/markdown;
+MimeType=text/markdown;text/plain;application/json;application/yaml;text/yaml;application/toml;application/xml;text/xml;text/rtf;application/rtf;application/pdf;
 Categories=Office;TextEditor;
 DESKTOP
 
