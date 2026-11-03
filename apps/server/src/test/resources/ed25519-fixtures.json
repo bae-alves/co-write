@@ -1,0 +1,18 @@
+{
+  "origin": "https://write.example.com",
+  "nonce": "dGVzdC1ub25jZS0wMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+  "publicKey": "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA5QRjJHHIYm25RSFQI531w6KQ5DbWY5ZKv0S+o8Ms3kE=\n-----END PUBLIC KEY-----\n",
+  "fingerprint": "SHA256:GTG7E5j/uf+p0x6DHMkEnn2zzNH6fAFEBRLwlMqG/78",
+  "messages": [
+    {
+      "purpose": "login",
+      "message": "co-write-login\nhttps://write.example.com\ndGVzdC1ub25jZS0wMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
+      "signature": "dNuz8LxlONLgCq0Yx4_OZrW2yqBDeNmsdA5-LaYTrS6y-NmvzK3ZUtJHbLihp3ALoG1IRvpy0Aj875gdjknkBQ"
+    },
+    {
+      "purpose": "register",
+      "message": "co-write-register\nhttps://write.example.com\ndGVzdC1ub25jZS0wMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA\nana",
+      "signature": "NdqGJLzTbX9Shwpof5VpWyYjcbaqOy3ZohlARNNLlo28ib-DwmFAHOB38UVOu3pul3zRBPdx9G2I33Ygzu-fAw"
+    }
+  ]
+}

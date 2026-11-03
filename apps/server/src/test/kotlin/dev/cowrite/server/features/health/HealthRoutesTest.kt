@@ -29,7 +29,17 @@ private fun withServer(
 ) = testApplication {
     application {
         val base = testDependencies()
-        module(config, dev.cowrite.server.Dependencies(HealthIntents(repository, "1.2.3"), base.auth, base.documents, base.collab))
+        module(
+            config,
+            dev.cowrite.server.Dependencies(
+                HealthIntents(repository, "1.2.3"),
+                base.instance,
+                base.auth,
+                base.documents,
+                base.collab,
+                base.tickets,
+            ),
+        )
     }
     block()
 }

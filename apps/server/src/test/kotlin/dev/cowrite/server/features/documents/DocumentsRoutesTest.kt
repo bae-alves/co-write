@@ -6,6 +6,7 @@ import dev.cowrite.server.module
 import dev.cowrite.server.testConfig
 import dev.cowrite.server.testDependencies
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
@@ -104,5 +105,60 @@ class DocumentsRoutesTest {
             assertEquals(HttpStatusCode.BadRequest, client.invite(ana, id, """{"username":"ana","role":"viewer"}""").status)
             assertEquals(HttpStatusCode.NotFound, client.invite(ana, id, """{"username":"nobody","role":"viewer"}""").status)
             assertEquals(HttpStatusCode.NotFound, client.invite(ana, "missing", """{"username":"cy","role":"viewer"}""").status)
+        }
+
+    private suspend fun io.ktor.client.HttpClient.docId(token: String): String =
+        json(postJson("/api/docs", """{"title":"Plan"}""", token).bodyAsText()).jsonObject["id"]!!.jsonPrimitive.content
+
+    @Test
+    fun `the owner removes members, nobody else does, and the owner stays`() =
+        withServer {
+            val ana = client.register("ana")
+            val bo = client.register("bo")
+            client.register("cy")
+            val id = client.docId(ana)
+            client.invite(ana, id, """{"username":"bo","role":"editor"}""")
+            client.invite(ana, id, """{"username":"cy","role":"viewer"}""")
+
+            assertEquals(HttpStatusCode.Forbidden, client.delete("/api/docs/$id/members/cy") { bearerAuth(bo) }.status)
+            assertEquals(HttpStatusCode.BadRequest, client.delete("/api/docs/$id/members/ana") { bearerAuth(ana) }.status)
+            assertEquals(HttpStatusCode.NotFound, client.delete("/api/docs/$id/members/nobody") { bearerAuth(ana) }.status)
+            assertEquals(HttpStatusCode.NoContent, client.delete("/api/docs/$id/members/bo") { bearerAuth(ana) }.status)
+            assertEquals(HttpStatusCode.NotFound, client.delete("/api/docs/$id/members/bo") { bearerAuth(ana) }.status)
+            assertEquals("[]", client.get("/api/docs") { bearerAuth(bo) }.bodyAsText())
+            assertEquals(1, json(client.get("/api/docs") { bearerAuth(ana) }.bodyAsText()).jsonArray.size)
+        }
+
+    @Test
+    fun `transfers ownership, leaving the old owner an editor`() =
+        withServer {
+            val ana = client.register("ana")
+            val bo = client.register("bo")
+            val id = client.docId(ana)
+            fun put(
+                token: String,
+                body: String,
+            ) = kotlinx.coroutines.runBlocking {
+                client.put("/api/docs/$id/owner") {
+                    bearerAuth(token)
+                    contentType(ContentType.Application.Json)
+                    setBody(body)
+                }
+            }
+
+            assertEquals(HttpStatusCode.NotFound, put(bo, """{"username":"ana"}""").status)
+            assertEquals(HttpStatusCode.BadRequest, put(ana, """{"username":"ana"}""").status)
+            assertEquals(HttpStatusCode.NotFound, put(ana, """{"username":"nobody"}""").status)
+            assertEquals(HttpStatusCode.NoContent, put(ana, """{"username":"bo"}""").status)
+
+            fun role(token: String) =
+                json(kotlinx.coroutines.runBlocking { client.get("/api/docs") { bearerAuth(token) }.bodyAsText() })
+                    .jsonArray
+                    .single()
+                    .jsonObject["role"]!!
+                    .jsonPrimitive.content
+            assertEquals("owner", role(bo))
+            assertEquals("editor", role(ana))
+            assertEquals(HttpStatusCode.Forbidden, put(ana, """{"username":"ana"}""").status)
         }
 }

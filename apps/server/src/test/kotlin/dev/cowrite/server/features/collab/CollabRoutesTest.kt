@@ -2,6 +2,7 @@ package dev.cowrite.server.features.collab
 
 import dev.cowrite.server.FakeDatabase
 import dev.cowrite.server.YjsFixtures
+import dev.cowrite.server.features.auth.jsonField
 import dev.cowrite.server.features.auth.postJson
 import dev.cowrite.server.features.auth.register
 import dev.cowrite.server.kit.YProtocol
@@ -14,10 +15,12 @@ import io.ktor.client.plugins.websocket.DefaultClientWebSocketSession
 import io.ktor.client.plugins.websocket.WebSockets
 import io.ktor.client.plugins.websocket.webSocket
 import io.ktor.client.request.bearerAuth
+import io.ktor.client.request.delete
 import io.ktor.client.request.put
 import io.ktor.client.request.setBody
 import io.ktor.client.statement.bodyAsText
 import io.ktor.http.ContentType
+import io.ktor.http.HttpStatusCode
 import io.ktor.http.contentType
 import io.ktor.server.testing.ApplicationTestBuilder
 import io.ktor.server.testing.testApplication
@@ -31,6 +34,7 @@ import kotlin.test.Test
 import kotlin.test.assertContentEquals
 import kotlin.test.assertEquals
 import kotlin.test.assertIs
+import kotlin.test.assertTrue
 
 private fun u(vararg values: Int) = ByteArray(values.size) { values[it].toByte() }
 
@@ -106,6 +110,24 @@ class CollabRoutesTest {
         return code
     }
 
+    private suspend fun HttpClient.ticket(
+        token: String,
+        id: String,
+    ): String = postJson("/api/ws-ticket", """{"docId":"$id"}""", token).bodyAsText().jsonField("ticket")
+
+    /** What the desktop does: trade the session token for a single-use ticket, then connect with it. */
+    private suspend fun HttpClient.docSocket(
+        id: String,
+        token: String,
+        block: suspend DefaultClientWebSocketSession.() -> Unit,
+    ) = webSocket("/ws/docs/$id?ticket=${ticket(token, id)}", block = block)
+
+    private suspend fun DefaultClientWebSocketSession.closedWith(): Short? =
+        withTimeout(5_000) {
+            for (frame in incoming) Unit
+            closeReason.await()?.code
+        }
+
     @Test
     fun `refuses unauthenticated, unknown and foreign documents with terminal close codes`() =
         withServer { ws ->
@@ -113,9 +135,92 @@ class CollabRoutesTest {
             val bo = client.register("bo")
             val id = client.newDocument(ana)
             assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$id"))
-            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$id?token=bogus"))
-            assertEquals(CollabCloseCode.NOT_FOUND, ws.closeCode("/ws/docs/nope?token=$ana"))
-            assertEquals(CollabCloseCode.FORBIDDEN, ws.closeCode("/ws/docs/$id?token=$bo"))
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$id?ticket=bogus"))
+            // The session token is no longer accepted in the URL, valid or not.
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$id?token=$ana"))
+            // A ticket is not even issued for a document the caller cannot open.
+            assertEquals(HttpStatusCode.Forbidden, ws.postJson("/api/ws-ticket", """{"docId":"$id"}""", bo).status)
+            assertEquals(HttpStatusCode.NotFound, ws.postJson("/api/ws-ticket", """{"docId":"nope"}""", ana).status)
+            assertEquals(HttpStatusCode.Unauthorized, ws.postJson("/api/ws-ticket", """{"docId":"$id"}""").status)
+        }
+
+    @Test
+    fun `a ticket works once, for its own document, and expires`() {
+        var now = 1_000_000L
+        testApplication {
+            application { module(testConfig, testDependencies(db, now = { now })) }
+            val ws = createClient { install(WebSockets) }
+            val ana = ws.register("ana")
+            val first = ws.newDocument(ana)
+            val second = ws.newDocument(ana)
+
+            val ticket = ws.ticket(ana, first)
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$second?ticket=$ticket"))
+            // The wrong-document attempt spent it.
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$first?ticket=$ticket"))
+
+            val used = ws.ticket(ana, first)
+            ws.webSocket("/ws/docs/$first?ticket=$used") { handshake() }
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$first?ticket=$used"))
+
+            val stale = ws.ticket(ana, first)
+            now += 31_000
+            assertEquals(CollabCloseCode.UNAUTHENTICATED, ws.closeCode("/ws/docs/$first?ticket=$stale"))
+        }
+    }
+
+    @Test
+    fun `a role change closes the open socket, and the reconnect gets the new role`() =
+        withServer { ws ->
+            val ana = client.register("ana")
+            val bo = client.register("bo")
+            val id = client.newDocument(ana)
+            client.share(ana, id, "bo", "editor")
+
+            ws.docSocket(id, bo) {
+                handshake()
+                answerStateRequest(YProtocol.EMPTY_UPDATE)
+                assertEquals(HttpStatusCode.NoContent, client.share(ana, id, "bo", "viewer").status)
+                assertEquals(CollabCloseCode.ROLE_CHANGED, closedWith())
+            }
+            // Not in the no-reconnect range: y-websocket reconnects by itself.
+            assertTrue(CollabCloseCode.ROLE_CHANGED !in 4400..4499)
+
+            ws.docSocket(id, bo) {
+                handshake()
+                send(Frame.Binary(true, YProtocol.update(u(9))))
+                awaitHandled()
+            }
+            ws.docSocket(id, ana) { assertEquals(emptyList(), handshake().map { it.toList() }) }
+        }
+
+    @Test
+    fun `removing a member closes their socket for good and keeps them out`() =
+        withServer { ws ->
+            val ana = client.register("ana")
+            val bo = client.register("bo")
+            val id = client.newDocument(ana)
+            client.share(ana, id, "bo", "editor")
+
+            ws.docSocket(id, bo) {
+                handshake()
+                val removed = client.delete("/api/docs/$id/members/bo") { bearerAuth(ana) }
+                assertEquals(HttpStatusCode.NoContent, removed.status)
+                assertEquals(CollabCloseCode.FORBIDDEN, closedWith())
+            }
+            assertEquals(HttpStatusCode.Forbidden, ws.postJson("/api/ws-ticket", """{"docId":"$id"}""", bo).status)
+        }
+
+    @Test
+    fun `deleting an account closes its sockets`() =
+        withServer { ws ->
+            val ana = client.register("ana")
+            val id = client.newDocument(ana)
+            ws.docSocket(id, ana) {
+                handshake()
+                client.delete("/api/me") { bearerAuth(ana) }
+                assertEquals(CollabCloseCode.UNAUTHENTICATED, closedWith())
+            }
         }
 
     @Test
@@ -126,7 +231,7 @@ class CollabRoutesTest {
             val id = client.newDocument(ana)
             client.share(ana, id, "bo", "editor")
 
-            ws.webSocket("/ws/docs/$id?token=$ana") {
+            ws.docSocket(id, ana) {
                 handshake()
                 answerStateRequest(YProtocol.EMPTY_UPDATE)
                 send(Frame.Binary(true, YProtocol.update(YjsFixtures.ana1)))
@@ -134,7 +239,7 @@ class CollabRoutesTest {
                 awaitHandled()
 
                 // bo edited offline. It joins, gets ana's edits, and answers with its full state.
-                ws.webSocket("/ws/docs/$id?token=$bo") {
+                ws.docSocket(id, bo) {
                     val replayed = handshake().map { it.toList() }
                     assertEquals(listOf(YjsFixtures.ana1.toList(), YjsFixtures.ana2.toList()), replayed)
                     answerStateRequest(YjsFixtures.boFull)
@@ -146,7 +251,7 @@ class CollabRoutesTest {
             }
 
             // A fresh client gets the compacted log: bo's snapshot, then ana's later edit.
-            ws.webSocket("/ws/docs/$id?token=$ana") {
+            ws.docSocket(id, ana) {
                 assertEquals(listOf(YjsFixtures.boFull.toList(), YjsFixtures.ana3.toList()), handshake().map { it.toList() })
             }
         }
@@ -155,16 +260,14 @@ class CollabRoutesTest {
     fun `viewers can follow along but not write`() =
         withServer { ws ->
             val ana = client.register("ana")
-            client.register("cy")
-            val cy = client.postJson("/api/auth/login", """{"username":"cy","password":"password1"}""").bodyAsText()
-            val cyToken = Json.parseToJsonElement(cy).jsonObject["token"]!!.jsonPrimitive.content
+            val cyToken = client.register("cy")
             val id = client.newDocument(ana)
             client.share(ana, id, "cy", "viewer")
 
-            ws.webSocket("/ws/docs/$id?token=$ana") {
+            ws.docSocket(id, ana) {
                 handshake()
                 answerStateRequest(YProtocol.EMPTY_UPDATE)
-                ws.webSocket("/ws/docs/$id?token=$cyToken") {
+                ws.docSocket(id, cyToken) {
                     handshake()
                     send(Frame.Binary(true, YProtocol.update(u(66))))
                     send(Frame.Binary(true, YProtocol.syncStep2(u(67))))
@@ -173,7 +276,7 @@ class CollabRoutesTest {
                 send(Frame.Binary(true, YProtocol.update(u(1))))
                 awaitHandled()
             }
-            ws.webSocket("/ws/docs/$id?token=$ana") {
+            ws.docSocket(id, ana) {
                 assertEquals(listOf(listOf<Byte>(1)), handshake().map { it.toList() })
             }
         }
@@ -183,7 +286,7 @@ class CollabRoutesTest {
         withServer { ws ->
             val ana = client.register("ana")
             val id = client.newDocument(ana)
-            ws.webSocket("/ws/docs/$id?token=$ana") {
+            ws.docSocket(id, ana) {
                 handshake()
                 val presence = YProtocol.awareness(listOf(YProtocol.AwarenessEntry(5, 1, """{"user":{"name":"ana"}}""")))
                 send(Frame.Binary(true, presence))

@@ -7,6 +7,7 @@ import dev.cowrite.server.features.auth.requireUser
 import io.ktor.http.HttpStatusCode
 import io.ktor.server.response.respond
 import io.ktor.server.routing.Route
+import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
 import io.ktor.server.routing.post
 import io.ktor.server.routing.put
@@ -33,11 +34,18 @@ data class MemberRequest(
     val role: String,
 )
 
+@Serializable
+data class OwnerRequest(
+    val username: String,
+)
+
 private fun Document.toResponse() = DocumentResponse(id, title, owner, role.wire, updatedAt)
 
+/** Document routes. With `manageMembers` off (`AUTH=none`) the member and owner routes are not mounted. */
 fun Route.documentsRoutes(
     intents: DocumentsIntents,
     auth: AuthIntents,
+    manageMembers: Boolean = true,
 ) {
     route("/api/docs") {
         get {
@@ -52,7 +60,7 @@ fun Route.documentsRoutes(
                 is CreateResult.Invalid -> call.respond(HttpStatusCode.BadRequest, ErrorResponse(result.reason))
             }
         }
-        put("/{id}/members") {
+        if (manageMembers) put("/{id}/members") {
             val user = call.requireUser(auth) ?: return@put
             val body = call.receiveOrBadRequest<MemberRequest>() ?: return@put
             val id = call.parameters["id"].orEmpty()
@@ -63,6 +71,33 @@ fun Route.documentsRoutes(
                     call.respond(HttpStatusCode.Forbidden, ErrorResponse("Only the owner can share this document."))
                 InviteResult.UnknownUser -> call.respond(HttpStatusCode.NotFound, ErrorResponse("No user with that name."))
                 is InviteResult.Invalid -> call.respond(HttpStatusCode.BadRequest, ErrorResponse(result.reason))
+            }
+        }
+        if (manageMembers) {
+            delete("/{id}/members/{username}") {
+                val user = call.requireUser(auth) ?: return@delete
+                val id = call.parameters["id"].orEmpty()
+                val member = call.parameters["username"].orEmpty()
+                when (val result = intents.removeMember(user, id, member)) {
+                    RemoveMemberResult.Done -> call.respond(HttpStatusCode.NoContent)
+                    RemoveMemberResult.NotFound -> call.respond(HttpStatusCode.NotFound, ErrorResponse("No such member."))
+                    RemoveMemberResult.Forbidden ->
+                        call.respond(HttpStatusCode.Forbidden, ErrorResponse("Only the owner can remove members."))
+                    is RemoveMemberResult.Invalid -> call.respond(HttpStatusCode.BadRequest, ErrorResponse(result.reason))
+                }
+            }
+            put("/{id}/owner") {
+                val user = call.requireUser(auth) ?: return@put
+                val body = call.receiveOrBadRequest<OwnerRequest>() ?: return@put
+                val id = call.parameters["id"].orEmpty()
+                when (val result = intents.transferOwnership(user, id, body.username)) {
+                    TransferResult.Done -> call.respond(HttpStatusCode.NoContent)
+                    TransferResult.NotFound -> call.respond(HttpStatusCode.NotFound, ErrorResponse("No such document."))
+                    TransferResult.Forbidden ->
+                        call.respond(HttpStatusCode.Forbidden, ErrorResponse("Only the owner can transfer this document."))
+                    TransferResult.UnknownUser -> call.respond(HttpStatusCode.NotFound, ErrorResponse("No user with that name."))
+                    is TransferResult.Invalid -> call.respond(HttpStatusCode.BadRequest, ErrorResponse(result.reason))
+                }
             }
         }
     }

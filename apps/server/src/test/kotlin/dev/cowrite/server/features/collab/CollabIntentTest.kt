@@ -14,8 +14,17 @@ import kotlin.test.assertTrue
 /** A connection that records what the room sends it. Updates are opaque, so any bytes will do. */
 private class FakePeer(
     override val id: Long,
+    override val userId: Long? = id,
 ) : Peer {
     val inbox = mutableListOf<Message>()
+    val closedWith = mutableListOf<Pair<Short, String>>()
+
+    override fun close(
+        code: Short,
+        reason: String,
+    ) {
+        closedWith += code to reason
+    }
 
     override fun send(frame: ByteArray) {
         inbox += YProtocol.decode(frame)
@@ -212,5 +221,29 @@ class CollabIntentTest {
             collab.receive(doc, ana, u())
             assertEquals(emptyList(), ana.take())
             assertEquals(emptyList(), log())
+        }
+
+    @Test
+    fun `disconnects a user's connections on one document or on all, and nobody else's`() =
+        runBlocking {
+            val intents = CollabIntents(db.collab)
+            val ana = FakePeer(1, userId = 10)
+            val anaAgain = FakePeer(2, userId = 10)
+            val bo = FakePeer(3, userId = 20)
+            val elsewhere = FakePeer(4, userId = 10)
+            intents.join(doc, ana, canWrite = true)
+            intents.join(doc, anaAgain, canWrite = true)
+            intents.join(doc, bo, canWrite = true)
+            intents.join("doc2", elsewhere, canWrite = true)
+
+            intents.disconnect(10, 4001, "role changed", documentId = doc)
+            assertEquals(listOf(4001.toShort() to "role changed"), ana.closedWith)
+            assertEquals(1, anaAgain.closedWith.size)
+            assertTrue(bo.closedWith.isEmpty())
+            assertTrue(elsewhere.closedWith.isEmpty(), "another document is left alone")
+
+            intents.disconnect(10, 4401, "account deleted")
+            assertEquals(1, elsewhere.closedWith.size)
+            assertTrue(bo.closedWith.isEmpty())
         }
 }

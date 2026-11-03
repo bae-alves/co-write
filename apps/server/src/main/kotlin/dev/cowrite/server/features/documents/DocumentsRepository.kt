@@ -34,6 +34,22 @@ interface DocumentsRepository {
     )
 
     suspend fun userIdOf(username: String): Long?
+
+    /** Every document, as an editor sees it (an `AUTH=none` instance has no per-user lists). */
+    suspend fun listAll(): List<Document>
+
+    /** Removes the membership; false when the user was not a member. The owner's row stays. */
+    suspend fun removeMember(
+        documentId: String,
+        userId: Long,
+    ): Boolean
+
+    /** Makes `toUserId` the owner; the previous owner stays on as an editor. */
+    suspend fun transferOwnership(
+        documentId: String,
+        fromUserId: Long,
+        toUserId: Long,
+    )
 }
 
 /** The only code in this feature that talks to PostgreSQL. */
@@ -161,4 +177,69 @@ class JdbcDocumentsRepository(
                 statement.executeQuery().use { rows -> if (rows.next()) rows.getLong(1) else null }
             }
         }
+
+    override suspend fun listAll(): List<Document> =
+        db { connection ->
+            connection
+                .prepareStatement(
+                    """
+                    SELECT d.id, d.title, o.username AS owner, 'editor' AS role, d.updated_at
+                    FROM documents d JOIN users o ON o.id = d.owner_id
+                    ORDER BY d.updated_at DESC
+                    """.trimIndent(),
+                ).use { statement ->
+                    statement.executeQuery().use { rows -> buildList { while (rows.next()) add(rows.toDocument()) } }
+                }
+        }
+
+    override suspend fun removeMember(
+        documentId: String,
+        userId: Long,
+    ): Boolean =
+        db { connection ->
+            connection
+                .prepareStatement("DELETE FROM document_members WHERE document_id = ? AND user_id = ? AND role <> 'owner'")
+                .use { statement ->
+                    statement.setString(1, documentId)
+                    statement.setLong(2, userId)
+                    statement.executeUpdate() > 0
+                }
+        }
+
+    override suspend fun transferOwnership(
+        documentId: String,
+        fromUserId: Long,
+        toUserId: Long,
+    ) {
+        db { connection ->
+            connection.autoCommit = false
+            try {
+                connection.prepareStatement("UPDATE documents SET owner_id = ? WHERE id = ?").use { statement ->
+                    statement.setLong(1, toUserId)
+                    statement.setString(2, documentId)
+                    statement.executeUpdate()
+                }
+                for ((user, role) in listOf(fromUserId to Role.EDITOR, toUserId to Role.OWNER)) {
+                    connection
+                        .prepareStatement(
+                            """
+                            INSERT INTO document_members (document_id, user_id, role) VALUES (?, ?, ?)
+                            ON CONFLICT (document_id, user_id) DO UPDATE SET role = EXCLUDED.role
+                            """.trimIndent(),
+                        ).use { statement ->
+                            statement.setString(1, documentId)
+                            statement.setLong(2, user)
+                            statement.setString(3, role.wire)
+                            statement.executeUpdate()
+                        }
+                }
+                connection.commit()
+            } catch (e: Exception) {
+                connection.rollback()
+                throw e
+            } finally {
+                connection.autoCommit = true
+            }
+        }
+    }
 }

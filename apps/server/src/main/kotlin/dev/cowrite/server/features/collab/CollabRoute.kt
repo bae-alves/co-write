@@ -3,6 +3,7 @@ package dev.cowrite.server.features.collab
 import dev.cowrite.server.features.auth.AuthIntents
 import dev.cowrite.server.features.documents.Access
 import dev.cowrite.server.features.documents.DocumentsIntents
+import dev.cowrite.server.features.tickets.TicketsIntents
 import io.ktor.server.routing.Route
 import io.ktor.server.websocket.webSocket
 import io.ktor.websocket.CloseReason
@@ -20,6 +21,9 @@ object CollabCloseCode {
     const val UNAUTHENTICATED: Short = 4401
     const val FORBIDDEN: Short = 4403
     const val NOT_FOUND: Short = 4404
+
+    /** Not in the no-reconnect range: the client reconnects and is authorised again, with its new role. */
+    const val ROLE_CHANGED: Short = 4001
 }
 
 /** Frames queued for one slow client before it is disconnected. */
@@ -28,18 +32,25 @@ private const val OUTBOX_CAPACITY = 4096
 private val peerIds = AtomicLong()
 
 /**
- * `/ws/docs/{id}?token=…`: authenticates, checks the caller's role, then hands frames to the
- * room. Outgoing frames go through a bounded queue so one slow client never stalls a room.
+ * `/ws/docs/{id}?ticket=…`: redeems the single-use ticket (an `AUTH=none` instance needs none),
+ * checks the caller's role, then hands frames to the room. Outgoing frames go through a bounded
+ * queue so one slow client never stalls a room.
  */
 fun Route.collabRoutes(
     collab: CollabIntents,
     documents: DocumentsIntents,
     auth: AuthIntents,
+    tickets: TicketsIntents,
 ) {
     webSocket("/ws/docs/{id}") {
-        val user = auth.authenticate(call.request.queryParameters["token"])
-        if (user == null) return@webSocket close(CloseReason(CollabCloseCode.UNAUTHENTICATED, "Sign in again."))
         val documentId = call.parameters["id"].orEmpty()
+        val user =
+            if (auth.isOpen) {
+                auth.openUser()
+            } else {
+                tickets.redeem(call.request.queryParameters["ticket"], documentId)
+            }
+        if (user == null) return@webSocket close(CloseReason(CollabCloseCode.UNAUTHENTICATED, "Sign in again."))
         val role =
             when (val access = documents.access(user, documentId)) {
                 is Access.Granted -> access.role
@@ -52,6 +63,14 @@ fun Route.collabRoutes(
         val peer =
             object : Peer {
                 override val id = peerIds.incrementAndGet()
+                override val userId: Long? = if (auth.isOpen) null else user.id
+
+                override fun close(
+                    code: Short,
+                    reason: String,
+                ) {
+                    launch { close(CloseReason(code, reason)) }
+                }
 
                 override fun send(frame: ByteArray) {
                     if (outbox.trySend(frame).isFailure) {
