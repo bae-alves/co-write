@@ -1,7 +1,20 @@
 import type { CoWriteApi } from '@co-write/shared'
 
-/** Where the Ktor server lives. Fixed at build time; the CSP only allows this origin. */
-export const SERVER_URL = import.meta.env.VITE_SERVER_URL ?? 'http://localhost:8080'
+let chosen: string | null = null
+
+/**
+ * Where the Ktor server lives: the origin the user chose (Connect to server…), or null. It is read
+ * from main once at start-up; choosing another server reloads the window, which reads it again.
+ * The CSP only allows this origin.
+ */
+export const serverUrl = (): string | null => chosen
+
+export async function initServer(): Promise<void> {
+  chosen =
+    (await desktopApi()
+      ?.getServer()
+      .catch(() => null)) ?? null
+}
 
 export class ApiError extends Error {
   constructor(
@@ -24,9 +37,11 @@ export async function apiRequest<T>(
   if (options.token) headers['Authorization'] = `Bearer ${options.token}`
   if (options.body !== undefined) headers['Content-Type'] = 'application/json'
 
+  const base = chosen
+  if (!base) throw new ApiError(0, 'No server chosen')
   let response: Response
   try {
-    response = await fetch(new URL(path, SERVER_URL), {
+    response = await fetch(new URL(path, base), {
       method: options.method ?? 'GET',
       headers,
       body: options.body === undefined ? undefined : JSON.stringify(options.body),

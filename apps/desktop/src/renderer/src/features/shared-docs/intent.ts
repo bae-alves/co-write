@@ -1,4 +1,9 @@
-import type { DocumentSummary, MemberRequest, Role } from '@co-write/shared'
+import {
+  isMarkdownFile,
+  type DocumentSummary,
+  type MemberRequest,
+  type Role,
+} from '@co-write/shared'
 import { accountIntents } from '@/features/account/intent'
 import { useAccount } from '@/features/account/model'
 import { documentIntents } from '@/features/document/intent'
@@ -16,7 +21,7 @@ export interface SharedDocsDeps {
   readonly documents: {
     openRemote(docId: string, title: string, role: Role, seed?: string): Promise<void>
     text(): string | null
-    close(): Promise<void>
+    closeRemote(): Promise<void>
   }
   readonly sessionRejected: () => void
   readonly revealSource: () => void
@@ -31,12 +36,15 @@ export function createSharedDocsIntents(deps: SharedDocsDeps) {
     const now = model.getState().state
     return now.tag === 'hidden' ? [] : now.docs
   }
+  // On an open instance there is no token (and no header); the list is still the user's to see.
   const token = (): string | null => {
     const account = deps.account.getState().state
+    if (account.tag === 'anonymous') return ''
     return account.tag === 'signedIn' ? account.token : null
   }
   const username = (): string | null => {
     const account = deps.account.getState().state
+    if (account.tag === 'anonymous') return '@open'
     return account.tag === 'signedIn' ? account.username : null
   }
 
@@ -45,7 +53,7 @@ export function createSharedDocsIntents(deps: SharedDocsDeps) {
     run: (token: string) => Promise<T>,
   ): Promise<{ ok: T } | { error: string }> {
     const current = token()
-    if (!current) return { error: 'Sign in first.' }
+    if (current === null) return { error: 'Sign in first.' }
     try {
       return { ok: await run(current) }
     } catch (error) {
@@ -61,7 +69,7 @@ export function createSharedDocsIntents(deps: SharedDocsDeps) {
 
   return {
     async refresh(): Promise<void> {
-      if (!token()) {
+      if (token() === null) {
         if (model.getState().state.tag !== 'hidden') go({ tag: 'hidden' })
         return
       }
@@ -96,7 +104,11 @@ export function createSharedDocsIntents(deps: SharedDocsDeps) {
       const document = deps.document.getState().state
       const text = deps.documents.text()
       if (document.tag !== 'local' || text === null) return 'Open a local file to share it.'
-      const title = document.title.replace(/\.(md|markdown|mdown|mkd)$/i, '')
+      // Markdown loses its extension (the default); other formats keep it, so the shared copy
+      // opens with the same editor.
+      const title = isMarkdownFile(document.title)
+        ? document.title.replace(/\.[^.]+$/, '')
+        : document.title
       const result = await call((t) => repository.create(t, title))
       if ('error' in result) return result.error
       await openSummary(result.ok, text)
@@ -117,14 +129,44 @@ export function createSharedDocsIntents(deps: SharedDocsDeps) {
       return 'error' in result ? result.error : null
     },
 
+    /** Gives the document to another user: they become its owner, you stay on as an editor. */
+    async transferOwnership(docId: string, username: string): Promise<string | null> {
+      const name = username.trim()
+      if (!name) return 'Enter a username.'
+      const result = await call((t) => repository.transferOwner(t, docId, name))
+      if ('error' in result) return result.error
+      void this.refresh()
+      return null
+    },
+
+    /** Takes `username` off the open shared document. Returns an error message, or null. */
+    async removeMember(username: string): Promise<string | null> {
+      const document = deps.document.getState().state
+      if (!isRemoteOpen(document)) return 'Open a shared document first.'
+      if (document.role !== 'owner') return 'Only the owner can remove people.'
+      const name = username.trim()
+      if (!name) return 'Enter a username.'
+      const result = await call((t) => repository.removeMember(t, document.ref.docId, name))
+      return 'error' in result ? result.error : null
+    },
+
+    /** Deletes the signed-in account, and with it the documents it owns. Returns an error, or null. */
+    async deleteAccount(): Promise<string | null> {
+      const result = await call((t) => repository.deleteAccount(t))
+      if ('error' in result) return result.error
+      go({ tag: 'hidden' })
+      void deps.documents.closeRemote()
+      return null
+    },
+
     /** Follows the account: load the list on sign-in; hide it and close shared docs on sign-out. */
     listen(): () => void {
       return deps.account.subscribe((next, previous) => {
         if (next.state.tag === previous.state.tag) return
-        if (next.state.tag === 'signedIn') void this.refresh()
+        if (next.state.tag === 'signedIn' || next.state.tag === 'anonymous') void this.refresh()
         if (next.state.tag === 'signedOut') {
           if (model.getState().state.tag !== 'hidden') go({ tag: 'hidden' })
-          if (isRemoteOpen(deps.document.getState().state)) void deps.documents.close()
+          void deps.documents.closeRemote()
         }
       })
     },

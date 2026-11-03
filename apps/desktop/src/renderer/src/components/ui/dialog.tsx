@@ -10,7 +10,9 @@ export function Dialog({
   title,
   description,
   error,
+  notice,
   busy,
+  wide,
   onClose,
   onSubmit,
   children,
@@ -19,7 +21,10 @@ export function Dialog({
   title: string
   description?: ReactNode
   error?: string | null
+  /** What just worked, when the dialog stays open after it. */
+  notice?: string | null
   busy?: boolean
+  wide?: boolean
   onClose: () => void
   onSubmit: (form: FormData, submitter: string | null) => void
   children?: ReactNode
@@ -47,7 +52,10 @@ export function Dialog({
         aria-modal="true"
         aria-label={title}
         onSubmit={submit}
-        className="w-[min(420px,calc(100vw-32px))] rounded-lg bg-raised p-5 shadow-2xl shadow-black/40"
+        className={cn(
+          'max-h-[78vh] overflow-y-auto rounded-lg bg-raised p-5 shadow-2xl shadow-black/40',
+          wide ? 'w-[min(560px,calc(100vw-32px))]' : 'w-[min(420px,calc(100vw-32px))]',
+        )}
       >
         <div className="mb-3 flex items-start justify-between gap-4">
           <div>
@@ -68,6 +76,11 @@ export function Dialog({
           {error && (
             <p role="alert" className="text-xs text-destructive">
               {error}
+            </p>
+          )}
+          {notice && !error && (
+            <p role="status" className="text-xs text-success">
+              {notice}
             </p>
           )}
           <div className="mt-1 flex justify-end gap-2">{actions}</div>

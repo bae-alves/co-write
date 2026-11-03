@@ -15,7 +15,10 @@ export function SharedDocsView() {
   const docs = useSharedDocs((s) => s.state)
   const account = useAccount((s) => s.state)
   const document = useDocument((s) => s.state)
-  const online = useServerStatus((s) => s.state.tag === 'online')
+  const status = useServerStatus((s) => s.state)
+  const online = status.tag === 'online'
+  // An open instance has no accounts: everyone is an editor of everything, so no owners to show.
+  const open = account.tag === 'anonymous'
   const activeId = 'ref' in document && document.ref.kind === 'remote' ? document.ref.docId : null
 
   useEffect(() => {
@@ -24,7 +27,8 @@ export function SharedDocsView() {
   }, [])
 
   // No server and no account: nothing here can work, so don't offer it.
-  if (!online && account.tag !== 'signedIn') return null
+  if (!online && account.tag !== 'signedIn' && account.tag !== 'anonymous') return null
+  const canUse = account.tag === 'signedIn' || open
 
   return (
     <section
@@ -32,7 +36,7 @@ export function SharedDocsView() {
       className="flex max-h-[45%] min-h-0 shrink-0 flex-col pt-1"
     >
       <SectionHeader title="Shared">
-        {account.tag === 'signedIn' && (
+        {canUse && (
           <>
             <IconButton
               label="New shared document"
@@ -51,7 +55,7 @@ export function SharedDocsView() {
         )}
       </SectionHeader>
       <div className="min-h-0 overflow-y-auto pb-3">
-        {account.tag !== 'signedIn' ? (
+        {!canUse ? (
           <div className="flex flex-col items-start gap-2 px-3 py-1">
             <p className="text-xs text-muted-foreground">Sign in to write together.</p>
             <Button
@@ -71,7 +75,7 @@ export function SharedDocsView() {
                 active={doc.id === activeId}
                 onClick={() => void sharedDocsIntents.open(doc)}
                 title={
-                  doc.owner === account.username
+                  open || doc.owner === (account.tag === 'signedIn' ? account.username : null)
                     ? doc.title
                     : `${doc.title} — shared by ${doc.owner}`
                 }
@@ -82,7 +86,7 @@ export function SharedDocsView() {
                   <Users className="text-muted-foreground" />
                 )}
                 <span className="truncate">{doc.title}</span>
-                {doc.owner !== account.username && (
+                {!open && doc.owner !== (account.tag === 'signedIn' ? account.username : null) && (
                   <span className="ml-auto truncate pl-2 text-[11px] text-muted-foreground">
                     {doc.owner}
                   </span>

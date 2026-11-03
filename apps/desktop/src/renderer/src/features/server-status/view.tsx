@@ -1,6 +1,7 @@
-import { RefreshCw } from 'lucide-react'
+import { RefreshCw, Settings } from 'lucide-react'
 import { useEffect } from 'react'
 import { IconButton } from '@/components/ui/section'
+import { workbenchIntents } from '@/features/workbench/intent'
 import { cn } from '@/lib/utils'
 import { serverStatusIntents } from './intent'
 import { useServerStatus } from './model'
@@ -31,17 +32,28 @@ export function ServerStatusView() {
         title={status.tag === 'offline' ? status.reason : undefined}
       >
         {status.tag === 'idle' && 'Server not checked'}
+        {status.tag === 'unset' && 'No server · working locally'}
         {status.tag === 'checking' && 'Checking server…'}
-        {status.tag === 'online' && `Server online (v${status.version})`}
+        {status.tag === 'online' &&
+          `Server online (v${status.version})${status.auth === 'none' ? ' · open' : ''}`}
         {status.tag === 'offline' && `Server offline: ${status.reason}`}
       </span>
+      {status.tag !== 'unset' && (
+        <IconButton
+          label="Check server"
+          className="size-5"
+          disabled={status.tag === 'checking'}
+          onClick={() => void serverStatusIntents.checkServer()}
+        >
+          <RefreshCw className={cn(status.tag === 'checking' && 'animate-spin')} />
+        </IconButton>
+      )}
       <IconButton
-        label="Check server"
+        label="Server settings"
         className="size-5"
-        disabled={status.tag === 'checking'}
-        onClick={() => void serverStatusIntents.checkServer()}
+        onClick={() => workbenchIntents.openDialog('server')}
       >
-        <RefreshCw className={cn(status.tag === 'checking' && 'animate-spin')} />
+        <Settings />
       </IconButton>
     </div>
   )
