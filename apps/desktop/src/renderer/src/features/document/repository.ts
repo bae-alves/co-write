@@ -1,8 +1,8 @@
-import { COLLAB_PATH, type DocRef } from '@co-write/shared'
+import { COLLAB_PATH, CollabCloseCode, type DocRef, type TicketResponse } from '@co-write/shared'
 import { Awareness } from 'y-protocols/awareness'
 import { WebsocketProvider } from 'y-websocket'
 import * as Y from 'yjs'
-import { desktopApi, SERVER_URL } from '@/server/repository'
+import { ApiError, apiRequest, desktopApi, serverUrl } from '@/server/repository'
 
 /** What CodeMirror binds to. The Y.Doc itself never leaves this file. */
 export interface Binding {
@@ -54,9 +54,21 @@ export interface RemoteSession extends BaseSession {
   onPeers(listener: (peers: readonly Peer[]) => void): () => void
 }
 
+/** A file that is only shown (PDF): its bytes, re-read when it changes on disk. */
+export interface ViewSession {
+  readonly kind: 'view'
+  readonly path: string
+  bytes(): Uint8Array
+  /** Reads the file again and returns the new bytes. */
+  reload(): Promise<Uint8Array>
+  close(): Promise<void>
+}
+
 export interface DocumentRepository {
   openLocal(path: string, user: UserInfo): Promise<LocalSession>
-  openRemote(docId: string, token: string, user: UserInfo): Promise<RemoteSession>
+  openView(path: string): Promise<ViewSession>
+  /** `token` is null on an open instance (no accounts), where no ticket is needed. */
+  openRemote(docId: string, token: string | null, user: UserInfo): Promise<RemoteSession>
 }
 
 /** Transaction origins. Only edits made through CodeMirror are undoable. */
@@ -145,8 +157,102 @@ function requireApi() {
   return api
 }
 
-export function createDocumentRepository(serverUrl: string): DocumentRepository {
-  const wsBase = new URL(COLLAB_PATH, serverUrl.replace(/^http/, 'ws')).href
+/** What `connectWithTickets` needs from a y-websocket provider (and what a test can fake). */
+export interface TicketedProvider {
+  params: Record<string, string>
+  shouldConnect: boolean
+  connect(): void
+  on(event: string, handler: (...args: never[]) => void): void
+  off(event: string, handler: (...args: never[]) => void): void
+  emit(event: string, args: unknown[]): void
+}
+
+const TERMINAL_STATUS: Record<number, number> = {
+  401: CollabCloseCode.unauthenticated,
+  403: CollabCloseCode.forbidden,
+  404: CollabCloseCode.notFound,
+}
+
+/**
+ * Connects a provider with a fresh single-use ticket every time (the session token never goes in
+ * a URL), and reconnects by itself the same way after a drop. y-websocket reconnects on its own
+ * with the URL it had, whose ticket is spent by then, so this takes over: it switches y-websocket's
+ * own reconnecting off and connects again once it has a new ticket, backing off between attempts.
+ *
+ * Close codes 4400–4499 (and a ticket refused with 401/403/404) are final: the provider emits
+ * `closed` and nothing reconnects. Any other close, including a role change, reconnects.
+ */
+export function connectWithTickets(
+  provider: TicketedProvider,
+  getTicket: () => Promise<string | null>,
+  { maxBackoffMs = 10_000 }: { maxBackoffMs?: number } = {},
+): { stop(): void } {
+  let stopped = false
+  let failures = 0
+  const backoff = () => Math.min(2 ** failures * 100, maxBackoffMs)
+
+  const connect = async (afterFailure: boolean) => {
+    while (!stopped) {
+      if (afterFailure) await new Promise((resolve) => setTimeout(resolve, backoff()))
+      if (stopped) return
+      try {
+        const ticket = await getTicket()
+        if (stopped) return
+        provider.params = ticket ? { ticket } : {}
+        provider.connect()
+        return
+      } catch (error) {
+        const final = error instanceof ApiError ? TERMINAL_STATUS[error.status] : undefined
+        if (final !== undefined) {
+          provider.emit('closed', [{ code: final, reason: (error as Error).message }, provider])
+          return
+        }
+        provider.emit('status', [{ status: 'disconnected' }])
+        failures++
+        afterFailure = true
+      }
+    }
+  }
+
+  const onClose = (event: { code: number } | null) => {
+    if (stopped) return
+    failures++
+    provider.shouldConnect = false
+    if (event && event.code >= 4400 && event.code < 4500) return // final; y-websocket says `closed`
+    void connect(true)
+  }
+  const onSynced = (synced: boolean) => {
+    if (synced) failures = 0
+  }
+  provider.on('connection-close', onClose as never)
+  provider.on('sync', onSynced as never)
+  void connect(false)
+
+  return {
+    stop() {
+      stopped = true
+      provider.off('connection-close', onClose as never)
+      provider.off('sync', onSynced as never)
+    },
+  }
+}
+
+export function createDocumentRepository(
+  serverUrl: () => string | null,
+  fetchTicket: (docId: string, token: string) => Promise<string> = async (docId, token) =>
+    (
+      await apiRequest<TicketResponse>('/api/ws-ticket', {
+        method: 'POST',
+        token,
+        body: { docId },
+      })
+    ).ticket,
+): DocumentRepository {
+  const wsBase = () => {
+    const url = serverUrl()
+    if (!url) throw new Error('No server chosen')
+    return new URL(COLLAB_PATH, url.replace(/^http/, 'ws')).href
+  }
 
   return {
     async openLocal(path, user) {
@@ -187,17 +293,35 @@ export function createDocumentRepository(serverUrl: string): DocumentRepository 
       }
     },
 
+    async openView(path) {
+      const api = requireApi()
+      let bytes = await api.readBinary(path)
+      return {
+        kind: 'view',
+        path,
+        bytes: () => bytes,
+        async reload() {
+          bytes = await api.readBinary(path)
+          return bytes
+        },
+        close: async () => {},
+      }
+    },
+
     async openRemote(docId, token, user) {
       const doc = new Y.Doc()
       const persistence = persistDoc(doc, { kind: 'remote', docId })
       await persistence.load()
       const binding = newBinding(doc, user)
-      const provider = new WebsocketProvider(wsBase, encodeURIComponent(docId), doc, {
-        params: { token },
+      const provider = new WebsocketProvider(wsBase(), encodeURIComponent(docId), doc, {
         awareness: binding.awareness,
         disableBc: true,
         maxBackoffTime: 10_000,
+        connect: false,
       })
+      const tickets = connectWithTickets(provider as unknown as TicketedProvider, async () =>
+        token === null ? null : fetchTicket(docId, token),
+      )
       const base = baseSession(doc, binding, persistence)
 
       const peers = (): Peer[] =>
@@ -236,6 +360,7 @@ export function createDocumentRepository(serverUrl: string): DocumentRepository 
           return () => binding.awareness.off('change', handler)
         },
         async close() {
+          tickets.stop()
           provider.destroy()
           await base.close()
         },
@@ -244,4 +369,4 @@ export function createDocumentRepository(serverUrl: string): DocumentRepository 
   }
 }
 
-export const documentRepository = createDocumentRepository(SERVER_URL)
+export const documentRepository = createDocumentRepository(serverUrl)

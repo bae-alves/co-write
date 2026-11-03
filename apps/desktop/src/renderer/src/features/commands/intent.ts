@@ -40,5 +40,8 @@ export const commandIntents = createCommandIntents({
     'toggle-files': () => workbenchIntents.toggle('files'),
     'toggle-source': () => workbenchIntents.toggle('source'),
     'toggle-preview': () => workbenchIntents.toggle('preview'),
+    'close-tab': () => void documentIntents.closeTab(),
+    'next-tab': () => documentIntents.cycle(1),
+    'previous-tab': () => documentIntents.cycle(-1),
   },
 })

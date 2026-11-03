@@ -3,18 +3,24 @@ import { watch, type FSWatcher } from 'node:fs'
 import { mkdir, open, readdir, readFile, realpath, rename, stat, writeFile } from 'node:fs/promises'
 import { basename, dirname, join, resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { MAX_FILE_BYTES, type FileNode, type ProjectChange } from '@co-write/shared'
+import {
+  isPdfFile,
+  isSupportedFile,
+  isTextFile,
+  MAX_BINARY_BYTES,
+  MAX_FILE_BYTES,
+  type FileNode,
+  type ProjectChange,
+} from '@co-write/shared'
 import { resolveInsideRoot, toProjectPath } from './paths'
 
-const MARKDOWN = /\.(md|markdown|mdown|mkd)$/i
 const SKIPPED_DIRS = new Set(['node_modules', '.git', 'out', 'dist', 'build'])
 const MAX_ENTRIES = 5_000
 
-export const isMarkdownFile = (name: string): boolean => MARKDOWN.test(name)
-
 /**
- * Lists Markdown files below `root`, folders first, both alphabetical. Hidden entries, build
- * folders and symlinks are skipped; folders without Markdown inside are left out.
+ * Lists the files co-write can open (text formats, RTF, PDF) below `root`, folders first, both
+ * alphabetical. Hidden entries, build folders and symlinks are skipped; folders without such
+ * files inside are left out.
  */
 export async function listTree(root: string): Promise<FileNode[]> {
   let budget = MAX_ENTRIES
@@ -36,7 +42,7 @@ export async function listTree(root: string): Promise<FileNode[]> {
             children,
           })
         }
-      } else if (entry.isFile() && isMarkdownFile(entry.name)) {
+      } else if (entry.isFile() && isSupportedFile(entry.name)) {
         files.push({ name: entry.name, path: toProjectPath(root, absolute), kind: 'file' })
       }
     }
@@ -52,7 +58,7 @@ export interface LaunchTarget {
 }
 
 /**
- * The first argument naming an existing folder or Markdown file. Accepts paths (relative ones
+ * The first argument naming an existing folder or a file co-write opens. Accepts paths (relative ones
  * resolve against `cwd`) and the `file://` URLs desktop launchers pass; switches are skipped.
  * Symlinks are resolved, so the file lands inside the folder that really contains it.
  */
@@ -70,12 +76,13 @@ export async function launchTarget(
     }
     const info = await stat(path)
     if (info.isDirectory()) return { root: path, file: null }
-    if (info.isFile() && isMarkdownFile(path)) return { root: dirname(path), file: basename(path) }
+    if (info.isFile() && isSupportedFile(path)) return { root: dirname(path), file: basename(path) }
   }
   return null
 }
 
 export async function readProjectFile(root: string, path: string): Promise<string> {
+  if (!isTextFile(path)) throw new Error(`Not a text file: ${path}`)
   const absolute = await resolveInsideRoot(root, path)
   const info = await stat(absolute)
   if (!info.isFile()) throw new Error(`Not a file: ${path}`)
@@ -83,9 +90,19 @@ export async function readProjectFile(root: string, path: string): Promise<strin
   return readFile(absolute, 'utf8')
 }
 
+/** The bytes of a file that is shown but never edited (PDF). */
+export async function readProjectBinary(root: string, path: string): Promise<Uint8Array> {
+  if (!isPdfFile(path)) throw new Error(`Not a viewable file: ${path}`)
+  const absolute = await resolveInsideRoot(root, path)
+  const info = await stat(absolute)
+  if (!info.isFile()) throw new Error(`Not a file: ${path}`)
+  if (info.size > MAX_BINARY_BYTES) throw new Error(`File too large: ${path}`)
+  return new Uint8Array(await readFile(absolute))
+}
+
 /** Writes via a temp file + rename so a crash never leaves a half-written document. */
 export async function saveProjectFile(root: string, path: string, content: string): Promise<void> {
-  if (!isMarkdownFile(path)) throw new Error(`Only Markdown files can be written: ${path}`)
+  if (!isTextFile(path)) throw new Error(`Only text files can be written: ${path}`)
   const absolute = await resolveInsideRoot(root, path)
   const temp = join(dirname(absolute), `.${basename(absolute)}.co-write-${randomUUID()}.tmp`)
   await writeFile(temp, content, { encoding: 'utf8', flag: 'wx' })
@@ -93,7 +110,7 @@ export async function saveProjectFile(root: string, path: string, content: strin
 }
 
 export async function createProjectFile(root: string, path: string): Promise<void> {
-  if (!isMarkdownFile(path)) throw new Error(`Only Markdown files can be created: ${path}`)
+  if (!isTextFile(path)) throw new Error(`Only text files can be created: ${path}`)
   const absolute = await resolveInsideRoot(root, path)
   await mkdir(dirname(absolute), { recursive: true })
   // Re-check: mkdir may have walked through a symlinked folder created in the meantime.
@@ -103,7 +120,7 @@ export async function createProjectFile(root: string, path: string): Promise<voi
 }
 
 /**
- * Watches the project and reports tree changes (debounced) and changes to individual Markdown
+ * Watches the project and reports tree changes (debounced) and changes to individual supported
  * files. Returns a function that stops watching.
  */
 export function watchProject(
@@ -120,7 +137,7 @@ export function watchProject(
       if (filename) {
         const path = filename.toString().split('\\').join('/')
         if (only !== null && path !== only) return
-        if (isMarkdownFile(path) && !path.split('/').some((part) => part.startsWith('.'))) {
+        if (isSupportedFile(path) && !path.split('/').some((part) => part.startsWith('.'))) {
           changedFiles.add(path)
         }
       }

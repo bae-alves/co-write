@@ -1,3 +1,5 @@
+import type { Capabilities } from '@co-write/shared'
+import { capabilitiesOfState, useDocument } from '@/features/document/model'
 import {
   DEFAULT_COLUMNS,
   useWorkbench,
@@ -14,15 +16,48 @@ export function canHide(columns: Columns, column: Column): boolean {
   return column === 'source' ? columns.preview : columns.source
 }
 
+/**
+ * The columns the window actually shows: the user's choice, limited to what the open file has.
+ * A PDF has no source, a JSON file no preview; if the user's choice would leave nothing, the
+ * file's own columns show instead. Their layout choice itself is left alone.
+ */
+export function effectiveColumns(columns: Columns, capabilities: Capabilities | null): Columns {
+  if (!capabilities) return columns
+  const source = columns.source && capabilities.source
+  const preview = columns.preview && capabilities.preview
+  if (!source && !preview) {
+    return { ...columns, source: capabilities.source, preview: capabilities.preview }
+  }
+  return { ...columns, source, preview }
+}
+
+/** Why a column's toggle does nothing for the open file: it has no such column, or it is the last. */
+export function lockOf(
+  columns: Columns,
+  capabilities: Capabilities | null,
+  column: Column,
+): 'unavailable' | 'last' | null {
+  if (column === 'files') return null
+  if (capabilities && !capabilities[column]) return 'unavailable'
+  const shown = effectiveColumns(columns, capabilities)
+  return shown[column] && !canHide(shown, column) ? 'last' : null
+}
+
 const sane = (columns: Columns): Columns =>
   columns.source || columns.preview ? columns : { ...columns, source: true }
 
 export interface WorkbenchDeps {
   readonly model: typeof useWorkbench
   readonly repository: WorkbenchRepository
+  /** The columns the open file uses; null when nothing is open. */
+  readonly capabilities?: () => Capabilities | null
 }
 
-export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
+export function createWorkbenchIntents({
+  model,
+  repository,
+  capabilities = () => null,
+}: WorkbenchDeps) {
   const ready = (): Extract<Workbench, { tag: 'ready' }> => {
     const state = model.getState().state
     if (state.tag === 'ready') return state
@@ -42,7 +77,9 @@ export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
     },
 
     toggle(column: Column): void {
-      this.setVisible(column, !ready().columns[column])
+      const state = ready()
+      if (lockOf(state.columns, capabilities(), column) !== null) return
+      this.setVisible(column, !effectiveColumns(state.columns, capabilities())[column])
     },
 
     setVisible(column: Column, visible: boolean, { remember = true } = {}): void {
@@ -67,19 +104,28 @@ export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
     },
 
     /**
-     * Runs a dialog's action: busy while it runs, closed when it returns null, kept open with
-     * the returned message otherwise.
+     * Runs a dialog's action: busy while it runs, closed when it returns null, kept open with the
+     * returned message when it returns one, and kept open with a notice when it returns
+     * `{ notice }` (the action worked but there is more to do in the dialog).
      */
-    async submitDialog(action: () => Promise<string | null>): Promise<void> {
+    async submitDialog(action: () => Promise<string | null | { notice: string }>): Promise<void> {
       const before = ready().dialog
       if (!before || before.busy) return
-      model.getState().go({ ...ready(), dialog: { ...before, busy: true, error: null } })
-      const error = await action().catch((e: unknown) =>
+      model
+        .getState()
+        .go({ ...ready(), dialog: { ...before, busy: true, error: null, notice: null } })
+      const outcome = await action().catch((e: unknown) =>
         e instanceof Error ? e.message : String(e),
       )
       const now = ready()
       if (now.dialog?.kind !== before.kind) return // closed or replaced meanwhile
-      model.getState().go({ ...now, dialog: error ? { ...now.dialog, busy: false, error } : null })
+      const dialog =
+        outcome === null
+          ? null
+          : typeof outcome === 'string'
+            ? { ...now.dialog, busy: false, error: outcome, notice: null }
+            : { ...now.dialog, busy: false, error: null, notice: outcome.notice }
+      model.getState().go({ ...now, dialog })
     },
 
     closeDialog(): void {
@@ -92,4 +138,5 @@ export function createWorkbenchIntents({ model, repository }: WorkbenchDeps) {
 export const workbenchIntents = createWorkbenchIntents({
   model: useWorkbench,
   repository: workbenchRepository,
+  capabilities: () => capabilitiesOfState(useDocument.getState().state),
 })
