@@ -2,7 +2,8 @@ import { createDfaModel } from '@/kit/dfa'
 
 export type Column = 'files' | 'source' | 'preview'
 
-export type DialogKind = 'new-file' | 'new-shared' | 'share' | 'sign-in'
+export type DialogKind =
+  'new-file' | 'new-shared' | 'share' | 'sign-in' | 'server' | 'display-name' | 'account'
 
 export interface Dialog {
   readonly kind: DialogKind
@@ -10,6 +11,8 @@ export interface Dialog {
   readonly busy: boolean
   /** Why the last submit failed. */
   readonly error: string | null
+  /** What the last submit did, when the dialog stays open after it (copied, removed, …). */
+  readonly notice?: string | null
 }
 
 export interface Columns {

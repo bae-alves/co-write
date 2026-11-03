@@ -15,6 +15,7 @@ export function installMenu(isDev: boolean): void {
         { label: 'New File…', accelerator: 'Ctrl+N', click: send('new-file') },
         { type: 'separator' },
         { label: 'Save', accelerator: 'Ctrl+S', click: send('save') },
+        { label: 'Close Tab', accelerator: 'Ctrl+W', click: send('close-tab') },
         { type: 'separator' },
         { role: 'quit' },
       ],
@@ -50,6 +51,9 @@ export function installMenu(isDev: boolean): void {
           click: send('toggle-preview'),
         },
         { type: 'separator' },
+        { label: 'Next Tab', accelerator: 'Ctrl+PageDown', click: send('next-tab') },
+        { label: 'Previous Tab', accelerator: 'Ctrl+PageUp', click: send('previous-tab') },
+        { type: 'separator' },
         { role: 'resetZoom' },
         { role: 'zoomIn' },
         { role: 'zoomOut' },
@@ -58,7 +62,14 @@ export function installMenu(isDev: boolean): void {
         ...(isDev ? [{ role: 'toggleDevTools' as const }] : []),
       ],
     },
-    { role: 'windowMenu' },
+    {
+      label: 'Window',
+      // Not the `windowMenu` role: its Close item would take Ctrl+W, which closes the tab here.
+      submenu: [
+        { role: 'minimize' },
+        { label: 'Close Window', accelerator: 'Ctrl+Shift+W', role: 'close' },
+      ],
+    },
   ]
   Menu.setApplicationMenu(Menu.buildFromTemplate(template))
 }

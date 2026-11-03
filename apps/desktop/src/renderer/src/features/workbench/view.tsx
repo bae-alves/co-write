@@ -1,4 +1,4 @@
-import { useEffect, useLayoutEffect, useRef, type ReactNode } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef, type ReactNode } from 'react'
 import {
   Group,
   Panel,
@@ -8,8 +8,9 @@ import {
   type LayoutChangedMeta,
   type PanelProps,
 } from 'react-resizable-panels'
+import { capabilitiesOfState, useDocument } from '@/features/document/model'
 import { cn } from '@/lib/utils'
-import { canHide, workbenchIntents } from './intent'
+import { effectiveColumns, lockOf, workbenchIntents } from './intent'
 import { useWorkbench, type Column, type Columns } from './model'
 
 const COLUMNS: readonly { column: Column; label: string; shortcut: string }[] = [
@@ -34,12 +35,15 @@ function ColumnIcon({ column, visible }: { column: Column; visible: boolean }) {
 /** VS Code–style layout toggles for the top-left of the toolbar. */
 export function ColumnToggles() {
   const state = useWorkbench((s) => s.state)
+  const capabilities = useDocument((s) => capabilitiesOfState(s.state))
   if (state.tag !== 'ready') return null
+  const shown = effectiveColumns(state.columns, capabilities)
   return (
     <div className="flex items-center gap-0.5" role="toolbar" aria-label="Columns">
       {COLUMNS.map(({ column, label, shortcut }) => {
-        const visible = state.columns[column]
-        const locked = visible && !canHide(state.columns, column)
+        const visible = shown[column]
+        const lock = lockOf(state.columns, capabilities, column)
+        const locked = lock !== null
         return (
           <button
             key={column}
@@ -48,9 +52,11 @@ export function ColumnToggles() {
             aria-disabled={locked}
             aria-label={`Toggle ${label}`}
             title={
-              locked
-                ? `${label} (show Source or Preview to hide this)`
-                : `Toggle ${label} (${shortcut})`
+              lock === 'unavailable'
+                ? `${label} (this kind of file has none)`
+                : lock === 'last'
+                  ? `${label} (show Source or Preview to hide this)`
+                  : `Toggle ${label} (${shortcut})`
             }
             onClick={() => workbenchIntents.toggle(column)}
             className={cn(
@@ -119,30 +125,32 @@ function ResizeHandle({ shown }: { shown: boolean }) {
   )
 }
 
-/**
- * Lays the columns out VS Code style: the file list keeps its width in pixels, source and preview
- * split the rest in the ratio the user last dragged them to.
- */
-function layoutFor(
-  columns: Columns,
-  groupWidth: number,
-  filesPx: number,
-  sourceShare: number,
-): Layout {
+/** Files column and editor area (tabs over source and preview), as percentages of the window. */
+function outerLayout(columns: Columns, groupWidth: number, filesPx: number): Layout {
   const files = columns.files ? Math.min(40, (filesPx / Math.max(groupWidth, 1)) * 100) : 0
-  const rest = 100 - files
+  return { files, editor: 100 - files }
+}
+
+/** Source and preview split the editor area in the ratio the user last dragged them to. */
+function innerLayout(columns: Columns, sourceShare: number): Layout {
   const both = columns.source && columns.preview
   return {
-    files,
-    source: columns.source ? (both ? rest * sourceShare : rest) : 0,
-    preview: columns.preview ? (both ? rest * (1 - sourceShare) : rest) : 0,
+    source: columns.source ? (both ? 100 * sourceShare : 100) : 0,
+    preview: columns.preview ? (both ? 100 * (1 - sourceShare) : 100) : 0,
   }
 }
 
-/** The three columns: files, source, preview. */
-export function Workbench(props: Record<Column, ReactNode>) {
+type Slots = Record<Column, ReactNode> & { readonly tabs: ReactNode }
+
+/**
+ * The window below the toolbar, VS Code style: the file list keeps its width in pixels; the rest
+ * is the editor area, tab strip on top, source and preview splitting what is below it.
+ */
+export function Workbench(props: Slots) {
   const state = useWorkbench((s) => s.state)
-  const group = useGroupRef()
+  const capabilities = useDocument((s) => capabilitiesOfState(s.state))
+  const outer = useGroupRef()
+  const inner = useGroupRef()
   const element = useRef<HTMLDivElement>(null)
   const filesPx = useRef(FILES_WIDTH_PX)
   const sourceShare = useRef(0.5)
@@ -151,52 +159,68 @@ export function Workbench(props: Record<Column, ReactNode>) {
     workbenchIntents.load()
   }, [])
 
-  const columns = state.tag === 'ready' ? state.columns : null
+  const columns = useMemo(
+    () => (state.tag === 'ready' ? effectiveColumns(state.columns, capabilities) : null),
+    [state, capabilities],
+  )
   useLayoutEffect(() => {
-    if (!columns || !group.current || !element.current) return
-    group.current.setLayout(
-      layoutFor(columns, element.current.offsetWidth, filesPx.current, sourceShare.current),
-    )
-  }, [columns, group])
+    if (!columns || !outer.current || !inner.current || !element.current) return
+    outer.current.setLayout(outerLayout(columns, element.current.offsetWidth, filesPx.current))
+    inner.current.setLayout(innerLayout(columns, sourceShare.current))
+  }, [columns, outer, inner])
 
   if (!columns) return null
 
-  /** Remembers what the user dragged to, and hides a column dragged shut. */
-  const onLayoutChanged = (layout: Layout, meta: LayoutChangedMeta) => {
+  /** Remembers where the user dragged the file list, and hides it when dragged shut. */
+  const onOuterChanged = (layout: Layout, meta: LayoutChangedMeta) => {
     if (!meta.isUserInteraction || !element.current) return
-    const width = element.current.offsetWidth
-    const [files = 0, source = 0, preview = 0] = [
-      layout['files'],
-      layout['source'],
-      layout['preview'],
-    ]
-    if (files > 0) filesPx.current = (files / 100) * width
-    if (source > 0 && preview > 0) sourceShare.current = source / (source + preview)
+    const files = layout['files'] ?? 0
+    if (files > 0) filesPx.current = (files / 100) * element.current.offsetWidth
     workbenchIntents.setVisible('files', files > 0)
-    workbenchIntents.setVisible('source', source > 0)
-    workbenchIntents.setVisible('preview', preview > 0)
+  }
+
+  /** Remembers the source/preview split, and hides a column dragged shut. */
+  const onInnerChanged = (layout: Layout, meta: LayoutChangedMeta) => {
+    if (!meta.isUserInteraction) return
+    const source = layout['source'] ?? 0
+    const preview = layout['preview'] ?? 0
+    if (source > 0 && preview > 0) sourceShare.current = source / (source + preview)
+    // Only columns this file has can be dragged open or shut.
+    if (capabilities?.source !== false) workbenchIntents.setVisible('source', source > 0)
+    if (capabilities?.preview !== false) workbenchIntents.setVisible('preview', preview > 0)
   }
 
   return (
     <Group
       orientation="horizontal"
       className="min-h-0 flex-1"
-      groupRef={group}
+      groupRef={outer}
       elementRef={element}
-      defaultLayout={layoutFor(columns, window.innerWidth, FILES_WIDTH_PX, 0.5)}
-      onLayoutChanged={onLayoutChanged}
+      defaultLayout={outerLayout(columns, window.innerWidth, FILES_WIDTH_PX)}
+      onLayoutChanged={onOuterChanged}
     >
       <ColumnPanel column="files" visible={columns.files}>
         {props.files}
       </ColumnPanel>
-      <ResizeHandle shown={columns.files && (columns.source || columns.preview)} />
-      <ColumnPanel column="source" visible={columns.source}>
-        {props.source}
-      </ColumnPanel>
-      <ResizeHandle shown={columns.source && columns.preview} />
-      <ColumnPanel column="preview" visible={columns.preview}>
-        {props.preview}
-      </ColumnPanel>
+      <ResizeHandle shown={columns.files} />
+      <Panel id="editor" minSize="240px" className="flex min-w-0 flex-col overflow-hidden">
+        {props.tabs}
+        <Group
+          orientation="horizontal"
+          className="min-h-0 flex-1"
+          groupRef={inner}
+          defaultLayout={innerLayout(columns, 0.5)}
+          onLayoutChanged={onInnerChanged}
+        >
+          <ColumnPanel column="source" visible={columns.source}>
+            {props.source}
+          </ColumnPanel>
+          <ResizeHandle shown={columns.source && columns.preview} />
+          <ColumnPanel column="preview" visible={columns.preview}>
+            {props.preview}
+          </ColumnPanel>
+        </Group>
+      </Panel>
     </Group>
   )
 }

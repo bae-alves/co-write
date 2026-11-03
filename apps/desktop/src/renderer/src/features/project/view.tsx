@@ -108,7 +108,9 @@ export function FilesView() {
               )}
             </>
           ) : (
-            <p className="px-3 py-2 text-xs text-muted-foreground">No Markdown files here yet.</p>
+            <p className="px-3 py-2 text-xs text-muted-foreground">
+              No files co-write can open here yet.
+            </p>
           )
         ) : (
           <div className="flex flex-col items-start gap-2 px-3 py-2">

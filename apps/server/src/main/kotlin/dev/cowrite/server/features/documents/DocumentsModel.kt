@@ -58,3 +58,29 @@ sealed interface InviteResult {
         val reason: String,
     ) : InviteResult
 }
+
+sealed interface RemoveMemberResult {
+    data object Done : RemoveMemberResult
+
+    data object NotFound : RemoveMemberResult
+
+    data object Forbidden : RemoveMemberResult
+
+    data class Invalid(
+        val reason: String,
+    ) : RemoveMemberResult
+}
+
+sealed interface TransferResult {
+    data object Done : TransferResult
+
+    data object NotFound : TransferResult
+
+    data object Forbidden : TransferResult
+
+    data object UnknownUser : TransferResult
+
+    data class Invalid(
+        val reason: String,
+    ) : TransferResult
+}

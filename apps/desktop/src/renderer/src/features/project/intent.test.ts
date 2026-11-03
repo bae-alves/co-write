@@ -168,6 +168,13 @@ describe('normalizeNewFileName', () => {
     ['/abs//path.md', 'abs/path.md'],
     ['a\\b', 'a/b.md'],
     ['./x', 'x.md'],
+    ['config/app.yaml', 'config/app.yaml'],
+    ['data.JSON', 'data.JSON'],
+    ['Makefile', 'Makefile'],
+    ['settings.toml', 'settings.toml'],
+    ['feed.xml', 'feed.xml'],
+    ['archive.zip', 'archive.zip.md'],
+    ['v1.2', 'v1.2.md'],
   ])('%j → %j', (input, expected) => {
     expect(normalizeNewFileName(input)).toBe(expected)
   })

@@ -1,5 +1,5 @@
 import type { DocumentSummary, MemberRequest } from '@co-write/shared'
-import { apiRequest } from '@/server/repository'
+import { apiRequest, serverUrl } from '@/server/repository'
 
 export interface SharedDocsRepository {
   list(token: string): Promise<DocumentSummary[]>
@@ -8,9 +8,14 @@ export interface SharedDocsRepository {
   cacheList(username: string, docs: readonly DocumentSummary[]): void
   create(token: string, title: string): Promise<DocumentSummary>
   addMember(token: string, docId: string, member: MemberRequest): Promise<void>
+  removeMember(token: string, docId: string, username: string): Promise<void>
+  transferOwner(token: string, docId: string, username: string): Promise<void>
+  /** Deletes the signed-in account with its keys, sessions, memberships and the documents it owns. */
+  deleteAccount(token: string): Promise<void>
 }
 
-const cacheKey = (username: string) => `co-write.shared-docs.${username}`
+// Per server too: the same name on two servers is two different people.
+const cacheKey = (username: string) => `co-write.shared-docs.${serverUrl() ?? ''}.${username}`
 
 export const sharedDocsRepository: SharedDocsRepository = {
   list: (token) => apiRequest('/api/docs', { token }),
@@ -36,4 +41,16 @@ export const sharedDocsRepository: SharedDocsRepository = {
       token,
       body: member,
     }),
+  removeMember: (token, docId, username) =>
+    apiRequest(`/api/docs/${encodeURIComponent(docId)}/members/${encodeURIComponent(username)}`, {
+      method: 'DELETE',
+      token,
+    }),
+  transferOwner: (token, docId, username) =>
+    apiRequest(`/api/docs/${encodeURIComponent(docId)}/owner`, {
+      method: 'PUT',
+      token,
+      body: { username },
+    }),
+  deleteAccount: (token) => apiRequest('/api/me', { method: 'DELETE', token }),
 }

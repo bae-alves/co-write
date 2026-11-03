@@ -1,15 +1,21 @@
 import { beforeEach, describe, expect, it } from 'vitest'
-import { createWorkbenchIntents } from './intent'
+import { capabilitiesOf, fileKindOf, type Capabilities } from '@co-write/shared'
+import { createWorkbenchIntents, effectiveColumns, lockOf } from './intent'
 import { useWorkbench } from './model'
 import type { ColumnPrefs, WorkbenchRepository } from './repository'
 
-function setup(saved: Partial<ColumnPrefs> | null = null) {
+const caps = (name: string): Capabilities => capabilitiesOf(fileKindOf(name)!)
+
+function setup(
+  saved: Partial<ColumnPrefs> | null = null,
+  capabilities?: () => Capabilities | null,
+) {
   const stored: ColumnPrefs[] = []
   const repository: WorkbenchRepository = {
     loadColumns: () => saved,
     storeColumns: (columns) => stored.push(columns),
   }
-  const intents = createWorkbenchIntents({ model: useWorkbench, repository })
+  const intents = createWorkbenchIntents({ model: useWorkbench, repository, capabilities })
   return { intents, stored, state: () => useWorkbench.getState().state }
 }
 
@@ -104,6 +110,17 @@ describe('workbench intents', () => {
     expect(state()).toMatchObject({ dialog: null })
   })
 
+  it('keeps a dialog open with a notice when its action worked but is not done', async () => {
+    const { intents, state } = setup()
+    intents.openDialog('sign-in')
+    await intents.submitDialog(async () => ({ notice: 'Public key copied.' }))
+    expect(state()).toMatchObject({
+      dialog: { kind: 'sign-in', busy: false, error: null, notice: 'Public key copied.' },
+    })
+    await intents.submitDialog(async () => 'Nope')
+    expect(state()).toMatchObject({ dialog: { error: 'Nope', notice: null } })
+  })
+
   it('keeps a dialog open with the error when its action fails', async () => {
     const { intents, state } = setup()
     intents.openDialog('new-file')
@@ -115,5 +132,60 @@ describe('workbench intents', () => {
       throw new Error('boom')
     })
     expect(state()).toMatchObject({ dialog: { error: 'boom' } })
+  })
+})
+
+describe('columns per file type', () => {
+  const all = { files: true, source: true, preview: true }
+
+  it('shows only the columns a file has', () => {
+    expect(effectiveColumns(all, caps('a.md'))).toEqual(all)
+    expect(effectiveColumns(all, caps('a.json'))).toEqual({
+      files: true,
+      source: true,
+      preview: false,
+    })
+    expect(effectiveColumns(all, caps('a.pdf'))).toEqual({
+      files: true,
+      source: false,
+      preview: true,
+    })
+    expect(effectiveColumns(all, null)).toEqual(all)
+  })
+
+  it('falls back to the file’s own column when the user’s choice leaves nothing', () => {
+    expect(effectiveColumns({ ...all, source: false }, caps('a.json'))).toEqual({
+      files: true,
+      source: true,
+      preview: false,
+    })
+    expect(effectiveColumns({ ...all, preview: false }, caps('a.pdf'))).toEqual({
+      files: true,
+      source: false,
+      preview: true,
+    })
+  })
+
+  it('says why a toggle does nothing', () => {
+    expect(lockOf(all, caps('a.json'), 'preview')).toBe('unavailable')
+    expect(lockOf(all, caps('a.json'), 'source')).toBe('last')
+    expect(lockOf(all, caps('a.pdf'), 'source')).toBe('unavailable')
+    expect(lockOf(all, caps('a.md'), 'source')).toBeNull()
+    expect(lockOf(all, caps('a.json'), 'files')).toBeNull()
+  })
+
+  it('leaves the remembered layout alone when the file has no such column', () => {
+    const { intents, state, stored } = setup(null, () => caps('a.pdf'))
+    intents.toggle('source')
+    expect(state()).toMatchObject({ columns: { source: true, preview: true } })
+    expect(stored).toEqual([])
+    intents.toggle('files')
+    expect(state()).toMatchObject({ columns: { files: false } })
+  })
+
+  it('toggles what the file has, relative to what is showing', () => {
+    const { intents, state } = setup({ preview: false }, () => caps('a.md'))
+    intents.toggle('preview')
+    expect(state()).toMatchObject({ columns: { source: true, preview: true } })
   })
 })

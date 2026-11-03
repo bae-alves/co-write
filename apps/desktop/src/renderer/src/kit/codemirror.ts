@@ -4,6 +4,8 @@ import {
   bracketMatching,
   HighlightStyle,
   indentOnInput,
+  LanguageDescription,
+  StreamLanguage,
   syntaxHighlighting,
 } from '@codemirror/language'
 import { languages } from '@codemirror/language-data'
@@ -20,6 +22,7 @@ import {
   lineNumbers,
   rectangularSelection,
 } from '@codemirror/view'
+import type { PreviewKind } from '@co-write/shared'
 import { tags as t } from '@lezer/highlight'
 
 /** WolfRose Dark, from the VS Code theme's `colors`. */
@@ -158,8 +161,19 @@ const wolfRoseHighlight = HighlightStyle.define([
   },
 ])
 
-/** Everything the Markdown editor needs except the Yjs binding (added per document). */
-export function markdownEditorExtensions(): Extension[] {
+/** RTF control words, escapes and braces, so the markup reads apart from the text. */
+const rtfLanguage = StreamLanguage.define({
+  token(stream) {
+    if (stream.match(/\\[a-zA-Z]+-?\d* ?/)) return 'keyword'
+    if (stream.match(/\\'[0-9a-fA-F]{2}/) || stream.match(/\\./)) return 'string'
+    if (stream.eat(/[{}]/)) return 'bracket'
+    stream.eatWhile(/[^\\{}]/)
+    return null
+  },
+})
+
+/** Everything an editor needs except the language and the Yjs binding (added per document). */
+export function baseEditorExtensions(): Extension[] {
   return [
     lineNumbers(),
     highlightActiveLineGutter(),
@@ -173,9 +187,32 @@ export function markdownEditorExtensions(): Extension[] {
     highlightSelectionMatches(),
     search({ top: true }),
     EditorView.lineWrapping,
-    markdown({ base: markdownLanguage, codeLanguages: languages }),
     syntaxHighlighting(wolfRoseHighlight),
     wolfRoseTheme,
     keymap.of([...defaultKeymap, ...searchKeymap, indentWithTab]),
   ]
+}
+
+/** Markdown is in the bundle, so a Markdown file is highlighted from the first paint. */
+export function markdownExtension(): Extension {
+  return markdown({ base: markdownLanguage, codeLanguages: languages })
+}
+
+/**
+ * The language extension for `fileName`, loaded on demand (YAML, TOML, XML, JSON, … each come as
+ * their own chunk). Null when the file is plain text or no grammar exists for it.
+ */
+export async function languageFor(
+  fileName: string,
+  preview: PreviewKind,
+): Promise<Extension | null> {
+  if (preview === 'markdown') return markdownExtension()
+  if (preview === 'rtf') return rtfLanguage
+  const description = LanguageDescription.matchFilename(languages, fileName)
+  if (!description) return null
+  try {
+    return (await description.load()).extension
+  } catch {
+    return null
+  }
 }

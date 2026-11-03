@@ -12,6 +12,7 @@ beforeEach(async () => {
   await mkdir(join(base, 'notes'))
   await writeFile(join(base, 'notes', 'a.md'), '# a')
   await writeFile(join(base, 'notes', 'b.txt'), 'b')
+  await writeFile(join(base, 'notes', 'c.png'), 'png')
 })
 
 afterEach(async () => {
@@ -42,8 +43,15 @@ describe('launchTarget', () => {
     })
   })
 
-  it('skips switches, missing paths and non-Markdown files', async () => {
-    const args = ['--no-sandbox', join(base, 'missing.md'), join(base, 'notes', 'b.txt')]
+  it('opens other text formats too', async () => {
+    expect(await launchTarget([join(base, 'notes', 'b.txt')], '/')).toEqual({
+      root: join(base, 'notes'),
+      file: 'b.txt',
+    })
+  })
+
+  it('skips switches, missing paths and files it cannot show', async () => {
+    const args = ['--no-sandbox', join(base, 'missing.md'), join(base, 'notes', 'c.png')]
     expect(await launchTarget(args, base)).toBeNull()
     expect(await launchTarget([], base)).toBeNull()
   })

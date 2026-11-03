@@ -5,6 +5,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 const checkServer = vi.hoisted(() => vi.fn(async () => {}))
 vi.mock('./intent', () => ({ serverStatusIntents: { checkServer } }))
 
+vi.mock('@/features/workbench/intent', () => ({ workbenchIntents: { openDialog: vi.fn() } }))
+
 import { useServerStatus } from './model'
 import { ServerStatusView } from './view'
 
@@ -22,7 +24,9 @@ describe('ServerStatusView', () => {
 
   it('renders whatever state the model holds', () => {
     useServerStatus.getState().go({ tag: 'checking' })
-    useServerStatus.getState().go({ tag: 'online', version: '1.0.0', checkedAt: 1 })
+    useServerStatus
+      .getState()
+      .go({ tag: 'online', version: '1.0.0', auth: 'accounts', oauth: [], checkedAt: 1 })
     render(<ServerStatusView />)
     expect(screen.getByRole('status').textContent).toBe('Server online (v1.0.0)')
   })
@@ -37,6 +41,8 @@ describe('ServerStatusView', () => {
   it('disables the button while checking', () => {
     useServerStatus.getState().go({ tag: 'checking' })
     render(<ServerStatusView />)
-    expect((screen.getByRole('button') as HTMLButtonElement).disabled).toBe(true)
+    expect(
+      (screen.getByRole('button', { name: 'Check server' }) as HTMLButtonElement).disabled,
+    ).toBe(true)
   })
 })

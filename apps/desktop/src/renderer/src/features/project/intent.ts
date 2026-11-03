@@ -1,4 +1,4 @@
-import type { ProjectChange, ProjectInfo } from '@co-write/shared'
+import { isSupportedFile, isTextFile, type ProjectChange, type ProjectInfo } from '@co-write/shared'
 import { documentIntents } from '@/features/document/intent'
 import { workbenchIntents } from '@/features/workbench/intent'
 import { useProject, type Project } from './model'
@@ -19,7 +19,10 @@ export interface ProjectDeps {
 
 const message = (error: unknown): string => (error instanceof Error ? error.message : String(error))
 
-/** `name` → a safe relative Markdown path: no leading slashes, no `..`, `.md` added if missing. */
+/**
+ * `name` → a safe relative path: no leading slashes, no `..`. Names co-write does not know as a
+ * text format (`notes`, `notes.final`) get `.md`; `config.yaml`, `Makefile`, `data.json` stay.
+ */
 export function normalizeNewFileName(name: string): string | null {
   const parts = name
     .trim()
@@ -27,7 +30,7 @@ export function normalizeNewFileName(name: string): string | null {
     .filter((part) => part !== '' && part !== '.')
   if (parts.length === 0 || parts.some((part) => part === '..')) return null
   const path = parts.join('/')
-  return /\.(md|markdown|mdown|mkd)$/i.test(path) ? path : `${path}.md`
+  return isSupportedFile(path) ? path : `${path}.md`
 }
 
 export function createProjectIntents({
@@ -105,7 +108,7 @@ export function createProjectIntents({
     },
 
     async openFile(path: string): Promise<void> {
-      revealSource()
+      if (isTextFile(path)) revealSource() // a PDF has no source to reveal
       await documents.openLocal(path)
     },
 
@@ -115,6 +118,7 @@ export function createProjectIntents({
       if (now.tag !== 'open' || now.file !== null) return 'Open a folder first.'
       const path = normalizeNewFileName(name)
       if (!path) return 'Enter a file name inside the project.'
+      if (!isTextFile(path)) return 'PDFs can be opened, not created here.'
       try {
         await repository.createFile(path)
       } catch (error) {

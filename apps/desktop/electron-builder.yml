@@ -17,6 +17,9 @@ files:
   - package.json
   - '!**/node_modules/**'
 asar: true
+# Releases are attached to GitHub by the release workflow. No update metadata (latest-linux.yml)
+# is written, and the app never updates itself.
+publish: null
 linux:
   target:
     - AppImage
@@ -24,9 +27,20 @@ linux:
   category: Office
   # White Markdown mark (public domain, svgrepo.com); icon.png is rendered from icon.svg.
   icon: resources/icon.png
-  # Lets file managers offer co-write for Markdown; the launcher passes the file's path or URL.
+  # Lets file managers offer co-write for Markdown, plain text, JSON, YAML, TOML, XML, RTF and
+  # PDF; the launcher passes the file's path or URL. Only Markdown is made the default.
   mimeTypes:
     - text/markdown
+    - text/plain
+    - application/json
+    - application/yaml
+    - text/yaml
+    - application/toml
+    - application/xml
+    - text/xml
+    - text/rtf
+    - application/rtf
+    - application/pdf
   # The window's WM_CLASS matches the .desktop entry, so launchers group it with the app.
   syncDesktopName: true
   maintainer: co-write contributors

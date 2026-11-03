@@ -5,26 +5,37 @@ import {
   DocStateSchema,
   FileContentSchema,
   IpcChannel,
+  InstanceInfoSchema,
+  normalizeOrigin,
+  OAuthRequestSchema,
   RelativePathSchema,
+  ServerUrlSchema,
+  SigningInputSchema,
+  signedMessage,
   type DocRef,
   type ProjectChange,
   type ProjectInfo,
 } from '@co-write/shared'
 import type { BrowserWindow, IpcMain, IpcMainInvokeEvent, WebContents } from 'electron'
+import { chmod, writeFile } from 'node:fs/promises'
 import { z } from 'zod'
+import { createKeyStore, readKeyFile } from './keys'
+import { signInWithOAuth } from './oauth'
+import type { ServerSetting } from './settings'
 import {
   createProjectFile,
   listTree,
+  readProjectBinary,
   readProjectFile,
   type LaunchTarget,
   saveProjectFile,
   watchProject,
 } from './project'
 import {
+  clearCredentials,
   docStateFile,
   loadBytes,
   loadCredentials,
-  removeFile,
   storeBytes,
   storeCredentials,
   type Cipher,
@@ -64,6 +75,17 @@ export interface IpcDeps {
   readonly appOrigin: string
   readonly userDataDir: string
   readonly cipher: Cipher
+  /** Which server this installation talks to. */
+  readonly server: ServerSetting
+  /** Called after the server was changed: windows reload so the CSP and the app follow. */
+  readonly onServerChanged: () => void
+  /** Asks the user for a key file to import; null when they cancel. */
+  readonly pickKeyToImport: (window: BrowserWindow | null) => Promise<string | null>
+  /** Asks the user where to save the exported key; null when they cancel. */
+  readonly pickKeyExportPath: (window: BrowserWindow | null) => Promise<string | null>
+  /** Opens a URL in the system browser (OAuth). Never called with anything the renderer chose. */
+  readonly openExternal: (url: string) => Promise<void>
+  readonly fetch?: typeof fetch
 }
 
 /** Per-window project state: the only folder that window's file calls may touch. */
@@ -83,6 +105,7 @@ export function registerIpc(deps: IpcDeps): {
   const projects = new Map<number, ProjectSession>()
   const docStateDir = join(deps.userDataDir, 'doc-state')
   const credentialsFile = join(deps.userDataDir, 'credentials.bin')
+  const keys = createKeyStore({ file: join(deps.userDataDir, 'identity.key'), cipher: deps.cipher })
 
   /** Registers a handler that checks the sender and parses its arguments before running. */
   const handle = <Schema extends z.ZodType<readonly unknown[]>, Result>(
@@ -161,6 +184,10 @@ export function registerIpc(deps: IpcDeps): {
     readProjectFile(rootFor(event, path), path),
   )
 
+  handle(IpcChannel.readBinary, z.tuple([RelativePathSchema]), async (event, [path]) =>
+    readProjectBinary(rootFor(event, path), path),
+  )
+
   handle(
     IpcChannel.saveFile,
     z.tuple([RelativePathSchema, FileContentSchema]),
@@ -184,15 +211,97 @@ export function registerIpc(deps: IpcDeps): {
     async (event, [ref, state]) => storeBytes(stateFile(event, ref), state),
   )
 
-  handle(IpcChannel.loadCredentials, NoArgs, async () =>
-    loadCredentials(credentialsFile, deps.cipher),
+  // Saved sessions are kept per server; with no server chosen there is nothing to load or save.
+  handle(IpcChannel.loadCredentials, NoArgs, async () => {
+    const origin = deps.server.origin()
+    return origin ? loadCredentials(credentialsFile, deps.cipher, origin) : null
+  })
+
+  handle(
+    IpcChannel.storeCredentials,
+    z.tuple([CredentialsSchema]),
+    async (_event, [credentials]) => {
+      const origin = deps.server.origin()
+      if (origin) await storeCredentials(credentialsFile, deps.cipher, origin, credentials)
+    },
   )
 
-  handle(IpcChannel.storeCredentials, z.tuple([CredentialsSchema]), async (_event, [credentials]) =>
-    storeCredentials(credentialsFile, deps.cipher, credentials),
+  handle(IpcChannel.clearCredentials, NoArgs, async () => {
+    const origin = deps.server.origin()
+    if (origin) await clearCredentials(credentialsFile, deps.cipher, origin)
+  })
+
+  handle(IpcChannel.getServer, NoArgs, async () => deps.server.origin())
+
+  handle(IpcChannel.setServer, z.tuple([ServerUrlSchema.nullable()]), async (_event, [url]) => {
+    await deps.server.set(url)
+    deps.onServerChanged()
+  })
+
+  handle(IpcChannel.probeServer, z.tuple([ServerUrlSchema]), async (_event, [url]) => {
+    const origin = normalizeOrigin(url)
+    if (!origin) throw new Error('Enter the server address, starting with http:// or https://')
+    let response: Response
+    try {
+      response = await (deps.fetch ?? fetch)(new URL('/api/instance', origin), {
+        headers: { Accept: 'application/json' },
+        signal: AbortSignal.timeout(5_000),
+      })
+    } catch {
+      throw new Error(`Could not reach ${origin}.`)
+    }
+    const info = response.ok
+      ? InstanceInfoSchema.safeParse(await response.json().catch(() => null))
+      : null
+    if (!info?.success) throw new Error(`${origin} does not look like a co-write server.`)
+    return info.data
+  })
+
+  handle(IpcChannel.keyInfo, NoArgs, async () => keys.info())
+
+  handle(IpcChannel.generateKey, z.tuple([z.boolean()]), async (_event, [replace]) =>
+    keys.generate(replace),
   )
 
-  handle(IpcChannel.clearCredentials, NoArgs, async () => removeFile(credentialsFile))
+  handle(IpcChannel.importKey, NoArgs, async (event) => {
+    const path = await deps.pickKeyToImport(deps.windowFor(event.sender))
+    return path ? keys.importPem(await readKeyFile(path)) : null
+  })
+
+  handle(IpcChannel.exportKey, NoArgs, async (event) => {
+    const pem = await keys.exportPem()
+    const path = await deps.pickKeyExportPath(deps.windowFor(event.sender))
+    if (!path) return false
+    await writeFile(path, pem, { mode: 0o600 })
+    await chmod(path, 0o600).catch(() => {})
+    return true
+  })
+
+  // The text is built here, for the server this installation is set to: a compromised renderer
+  // cannot get a signature for another server, another purpose, or arbitrary data.
+  handle(IpcChannel.signWithKey, z.tuple([SigningInputSchema]), async (_event, [input]) => {
+    const origin = deps.server.origin()
+    if (!origin) throw new Error('Choose a server first.')
+    return keys.sign(
+      input.purpose === 'register'
+        ? signedMessage({
+            purpose: 'register',
+            origin,
+            nonce: input.nonce,
+            username: input.username,
+          })
+        : signedMessage({ purpose: 'login', origin, nonce: input.nonce }),
+    )
+  })
+
+  handle(IpcChannel.oauthSignIn, z.tuple([OAuthRequestSchema]), async (_event, [request]) => {
+    const origin = deps.server.origin()
+    if (!origin) throw new Error('Choose a server first.')
+    return signInWithOAuth(
+      { openExternal: deps.openExternal, fetch: deps.fetch ?? fetch },
+      { origin, ...request },
+    )
+  })
 
   return {
     openLaunchTarget(sender, target) {

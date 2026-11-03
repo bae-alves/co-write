@@ -11,7 +11,7 @@ class SchemaRepository(
     private val dataSource: DataSource,
 ) {
     companion object {
-        val MIGRATIONS = listOf("V1__init.sql")
+        val MIGRATIONS = listOf("V1__init.sql", "V2__key_accounts.sql", "V3__oauth.sql", "V4__ws_tickets.sql")
         private const val LOCK_KEY = 7_311_942L
     }
 

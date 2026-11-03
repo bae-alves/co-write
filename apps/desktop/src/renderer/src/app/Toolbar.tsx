@@ -1,4 +1,4 @@
-import { LogOut, Share2 } from 'lucide-react'
+import { LogOut, Share2, UserRound } from 'lucide-react'
 import { Button } from '@/components/ui/button'
 import { IconButton } from '@/components/ui/section'
 import { accountIntents } from '@/features/account/intent'
@@ -14,11 +14,13 @@ export function Toolbar() {
   const account = useAccount((s) => s.state)
   const document = useDocument((s) => s.state)
   const project = useProject((s) => s.state)
-  const online = useServerStatus((s) => s.state.tag === 'online')
+  const status = useServerStatus((s) => s.state)
+  const online = status.tag === 'online'
+  const accounts = status.tag === 'online' && status.auth === 'accounts'
 
   const canShare =
     online &&
-    account.tag === 'signedIn' &&
+    (account.tag === 'signedIn' || account.tag === 'anonymous') &&
     (document.tag === 'local' || (isRemoteOpen(document) && document.role === 'owner'))
   const location =
     'ref' in document
@@ -53,13 +55,31 @@ export function Toolbar() {
       )}
       {account.tag === 'signedIn' ? (
         <div className="flex items-center gap-1 text-xs text-subtle-foreground">
-          <span className="max-w-32 truncate">{account.username}</span>
+          <button
+            type="button"
+            title="Account: keys, linked sign-ins, delete"
+            onClick={() => workbenchIntents.openDialog('account')}
+            className="max-w-32 truncate rounded-md px-1.5 py-1 hover:bg-raised hover:text-foreground focus-visible:ring-1 focus-visible:ring-ring focus-visible:outline-none"
+          >
+            {account.username}
+          </button>
           <IconButton label="Sign out" onClick={() => void accountIntents.signOut()}>
             <LogOut />
           </IconButton>
         </div>
-      ) : (
+      ) : account.tag === 'anonymous' ? (
         online && (
+          <Button
+            size="sm"
+            variant="ghost"
+            onClick={() => workbenchIntents.openDialog('display-name')}
+          >
+            <UserRound className="size-3.5" />
+            {account.name ?? 'Choose a name'}
+          </Button>
+        )
+      ) : (
+        accounts && (
           <Button
             size="sm"
             variant="ghost"

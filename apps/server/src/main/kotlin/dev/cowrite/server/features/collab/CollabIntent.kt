@@ -11,8 +11,17 @@ import kotlinx.coroutines.sync.withLock
 interface Peer {
     val id: Long
 
+    /** The user behind the connection; null on an `AUTH=none` instance, where there are no users. */
+    val userId: Long?
+
     /** Queues a frame for this connection. Must not block: it is called with the room locked. */
     fun send(frame: ByteArray)
+
+    /** Closes the connection with `code`. Must not block: it is called with the room locked. */
+    fun close(
+        code: Short,
+        reason: String,
+    )
 }
 
 /**
@@ -65,6 +74,24 @@ class CollabIntents(
     }
 
     private suspend fun room(documentId: String): Room? = registry.withLock { rooms[documentId] }
+
+    /**
+     * Closes every open connection of `userId` (on one document, or on all of them). The client
+     * decides from the code whether to reconnect, and a reconnect is authorised afresh.
+     */
+    suspend fun disconnect(
+        userId: Long,
+        code: Short,
+        reason: String,
+        documentId: String? = null,
+    ) {
+        val open = registry.withLock { rooms.values.filter { documentId == null || it.documentId == documentId } }
+        for (room in open) {
+            room.lock.withLock {
+                room.connections.values.filter { it.userId == userId }.forEach { it.close(code, reason) }
+            }
+        }
+    }
 
     /** Every stored update, then an empty sync step 2 so the client knows it is in sync. */
     private fun replay(

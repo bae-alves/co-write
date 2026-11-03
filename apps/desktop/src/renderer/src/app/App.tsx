@@ -1,7 +1,7 @@
 import { useEffect } from 'react'
 import { accountIntents } from '@/features/account/intent'
 import { commandIntents } from '@/features/commands/intent'
-import { SourceView } from '@/features/document/view'
+import { SourceView, TabBarView } from '@/features/document/view'
 import { PreviewView } from '@/features/preview/view'
 import { FilesView } from '@/features/project/view'
 import { SharedDocsView } from '@/features/shared-docs/view'
@@ -10,7 +10,7 @@ import { Dialogs } from './dialogs'
 import { StatusBar } from './StatusBar'
 import { Toolbar } from './Toolbar'
 
-/** Composition root of the renderer: toolbar, the three columns, status bar. */
+/** Composition root of the renderer: toolbar, files, tabs over source and preview, status bar. */
 export function App() {
   useEffect(() => {
     void accountIntents.restore()
@@ -27,6 +27,7 @@ export function App() {
             <SharedDocsView />
           </>
         }
+        tabs={<TabBarView />}
         source={<SourceView />}
         preview={<PreviewView />}
       />

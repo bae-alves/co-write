@@ -12,6 +12,7 @@ export const IpcChannel = {
   listProject: 'project:list',
   openFileFolder: 'project:open-file-folder',
   readFile: 'file:read',
+  readBinary: 'file:read-binary',
   saveFile: 'file:save',
   createFile: 'file:create',
   loadDocState: 'doc-state:load',
@@ -19,6 +20,15 @@ export const IpcChannel = {
   loadCredentials: 'credentials:load',
   storeCredentials: 'credentials:store',
   clearCredentials: 'credentials:clear',
+  getServer: 'server:get',
+  setServer: 'server:set',
+  probeServer: 'server:probe',
+  keyInfo: 'keys:info',
+  generateKey: 'keys:generate',
+  importKey: 'keys:import',
+  exportKey: 'keys:export',
+  signWithKey: 'keys:sign',
+  oauthSignIn: 'oauth:sign-in',
   /** main → renderer: the project tree or a file in it changed on disk. */
   projectChanged: 'project:changed',
   /** main → renderer: a native menu item was chosen. */
